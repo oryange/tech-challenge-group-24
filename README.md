@@ -44,6 +44,39 @@ cp .env.example .env
 # Edite .env com seu token HuggingFace e caminhos desejados
 ```
 
+## Verificação do setup
+
+Após a instalação, rode os comandos abaixo para confirmar que tudo está funcionando antes de avançar:
+
+```bash
+# 1. Verificar dependências instaladas
+python -c "
+import importlib.metadata
+import langchain, sqlalchemy, datasets, mlx_lm
+
+print('langchain:  ', langchain.__version__)
+print('langgraph:  ', importlib.metadata.version('langgraph'))
+print('sqlalchemy: ', sqlalchemy.__version__)
+print('mlx-lm:     ', importlib.metadata.version('mlx-lm'))
+print('datasets:   ', importlib.metadata.version('datasets'))
+print()
+print('Setup OK — dependências instaladas com sucesso!')
+"
+
+# 2. Verificar que os pacotes src/ são reconhecidos pelo Python
+python -c "
+import src
+import src.data, src.fine_tuning, src.llm
+import src.assistant, src.graph, src.database, src.logging
+print('Todos os pacotes src/ reconhecidos com sucesso!')
+"
+
+# 3. Rodar o pytest (deve retornar 'no tests ran' sem erros — correto neste estágio)
+pytest tests/ -v
+```
+
+> **Nota:** O erro `cannot import name 'loader' from 'src.data'` é esperado até o PR 02 ser mergeado — os módulos são implementados incrementalmente por PR.
+
 ## Como executar o pipeline completo
 
 ```bash
