@@ -56,19 +56,20 @@ tech-challenge-fase3/
 
 ## PRs — Divisão de trabalho
 
-### PR 01 — Setup do projeto
+### PR 01 — Setup do projeto ✅
 **Responsável:** qualquer uma  
-**Entrega:** repositório inicial pronto para desenvolvimento
+**Entrega:** repositório inicial pronto para desenvolvimento  
+**Branch:** `feat/pr01-setup-projeto`
 
-- [ ] Criar repositório `tech-challenge-fase3` no GitHub
-- [ ] Criar estrutura de pastas conforme acima
-- [ ] Criar `requirements.txt` com todas as dependências
-- [ ] Criar `.env.example` com as variáveis de ambiente
-- [ ] Criar `pytest.ini`
-- [ ] Criar todos os `__init__.py` dos pacotes em `src/`
-- [ ] Criar `README.md` inicial (pode ser esqueleto, será completado depois)
-- [ ] Criar `tests/__init__.py`
-- [ ] Adicionar `.gitignore` (ignorar `data/raw/`, `data/fine_tuned/`, `logs/`, `.env`, `__pycache__`)
+- [x] Criar repositório `tech-challenge-fase3` no GitHub
+- [x] Criar estrutura de pastas conforme acima
+- [x] Criar `requirements.txt` com todas as dependências
+- [x] Criar `.env.example` com as variáveis de ambiente
+- [x] Criar `pytest.ini`
+- [x] Criar todos os `__init__.py` dos pacotes em `src/`
+- [x] Criar `README.md` inicial (pode ser esqueleto, será completado depois)
+- [x] Criar `tests/__init__.py`
+- [x] Adicionar `.gitignore` (ignorar `data/raw/`, `data/fine_tuned/`, `logs/`, `.env`, `__pycache__`)
 
 **Dependências de outras PRs:** nenhuma — deve ser a primeira
 
