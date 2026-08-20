@@ -156,7 +156,7 @@ tech-challenge-group-24/
 │   ├── processed/          # Dataset curado (JSONL)
 │   ├── synthetic/          # Dados sintéticos hospitalares
 │   ├── database/           # SQLite de pacientes — DB_PATH (gerado localmente)
-│   └── fine_tuned/         # Adapters LoRA — ADAPTER_PATH (gerado localmente)
+│   └── fine_tuned/adapters/ # Pesos LoRA — ADAPTER_PATH (gerado localmente)
 ├── logs/                   # audit.jsonl — AUDIT_LOG_PATH (gerado localmente)
 ├── notebooks/
 │   ├── 01_data_preparation.ipynb
@@ -173,10 +173,14 @@ tech-challenge-group-24/
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
-│   └── diagrama-langchain.md
+│   └── diagramas.md
 ├── .env.example
+├── .gitignore
+├── .pre-commit-config.yaml
+├── CHECKLIST_FASE3.md
 ├── requirements.txt
-└── pytest.ini
+├── pytest.ini
+└── README.md
 ```
 
 ## Equipe

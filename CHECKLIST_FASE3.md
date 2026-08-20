@@ -1,7 +1,7 @@
 # Tech Challenge Fase 3 — Checklist de PRs
 
 > Assistente Médico com LLM Fine-tuned + LangChain + LangGraph  
-> Grupo 24 | MacBook Pro M3 24GB | Python 3.13
+> Grupo 24 | Requer Python 3.11+ (máquina de desenvolvimento: MacBook Pro M3 24GB, Python 3.13)
 
 ---
 
@@ -28,7 +28,7 @@ tech-challenge-group-24/
 │   ├── processed/                  # Dataset curado para fine-tuning (JSONL)
 │   ├── synthetic/                  # Protocolos e laudos sintéticos
 │   ├── database/                   # SQLite com pacientes sintéticos
-│   └── fine_tuned/adapters/        # Pesos LoRA após fine-tuning
+│   └── fine_tuned/adapters/        # Pesos LoRA após fine-tuning (ADAPTER_PATH)
 ├── notebooks/
 │   ├── 01_data_preparation.ipynb
 │   ├── 02_fine_tuning.ipynb
@@ -44,11 +44,14 @@ tech-challenge-group-24/
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
-│   └── diagrama-langchain.md
+│   └── diagramas.md
 ├── logs/
 ├── .env.example
+├── .gitignore
+├── .pre-commit-config.yaml
 ├── requirements.txt
 ├── pytest.ini
+├── CHECKLIST_FASE3.md
 └── README.md
 ```
 
@@ -69,7 +72,11 @@ tech-challenge-group-24/
 - [x] Criar todos os `__init__.py` dos pacotes em `src/`
 - [x] Criar `README.md` inicial (pode ser esqueleto, será completado depois)
 - [x] Criar `tests/__init__.py`
-- [x] Adicionar `.gitignore` (ignorar `data/raw/`, `data/fine_tuned/`, `logs/`, `.env`, `__pycache__`)
+- [x] Adicionar `.gitignore` (ignorar `data/raw/`, `data/fine_tuned/`, `data/database/`,
+      `logs/`, `.env`, `__pycache__` — com `.gitkeep` versionado em cada um deles;
+      `data/processed/` e `data/synthetic/` ficam versionados de propósito, são entregáveis)
+- [x] Adicionar `.pre-commit-config.yaml` (hoje `repos: []` — sem hooks; existe para não
+      bloquear commits em quem tem o pre-commit instalado globalmente)
 
 **Dependências de outras PRs:** nenhuma — deve ser a primeira
 
@@ -92,8 +99,16 @@ tech-challenge-group-24/
   - Funções: `anonymize(text)` e `anonymize_record(dict)`
 
 - [ ] `src/data/synthetic_generator.py`
-  - Gera ~100 registros sintéticos: protocolos CID-10, laudos e FAQs médicas
+  - Gera ~100 registros sintéticos cobrindo os quatro tipos exigidos pelo enunciado
+    ("protocolos médicos do hospital; exemplos de perguntas frequentes feitas por médicos;
+    modelos de laudos, receitas e procedimentos internos"):
+    - protocolos CID-10
+    - FAQs médicas
+    - modelos de laudo
+    - modelos de receita e de procedimento interno (posologia sempre fictícia, com o
+      disclaimer de validação humana — o assistente nunca prescreve por conta própria)
   - Usa templates com variação aleatória (sem dados reais)
+  - Campo `source` identifica o tipo do registro, para o assistente citar a fonte depois
   - Salva em `data/synthetic/synthetic_hospital.jsonl`
   - Executável diretamente: `python -m src.data.synthetic_generator`
 
@@ -376,7 +391,7 @@ tech-challenge-group-24/
   - Segurança: guardrails, logging, explainability
   - Conclusão e trabalhos futuros
 
-- [ ] `docs/diagrama-langchain.md`
+- [ ] `docs/diagramas.md`
   - Diagrama Mermaid do pipeline LangChain
   - Diagrama Mermaid do fluxo LangGraph
 
