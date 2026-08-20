@@ -127,13 +127,17 @@ python -m src.data.curator
 # 4. Fine-tuning do modelo (requer Apple Silicon)
 python -m src.fine_tuning.trainer
 
-# 5. Popular banco de dados com pacientes sintéticos
+# 5. Avaliar o modelo — ROUGE-L e BLEU-4, baseline vs fine-tuned
+#    Gera docs/evaluation_results.json, que alimenta as métricas do relatório técnico
+python -m src.fine_tuning.evaluator
+
+# 6. Popular banco de dados com pacientes sintéticos
 python -m src.database.seed
 
-# 6. Iniciar assistente médico interativo
+# 7. Iniciar assistente médico interativo
 python -m src.assistant.chain
 
-# 7. Executar fluxo LangGraph
+# 8. Executar fluxo LangGraph
 python -m src.graph.clinical_flow
 ```
 
@@ -173,7 +177,8 @@ tech-challenge-group-24/
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
-│   └── diagramas.md
+│   ├── diagramas.md
+│   └── evaluation_results.json  # Métricas ROUGE-L/BLEU-4 (gerado pelo evaluator)
 ├── .env.example
 ├── .gitignore
 ├── .pre-commit-config.yaml

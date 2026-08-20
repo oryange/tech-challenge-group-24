@@ -44,7 +44,8 @@ tech-challenge-group-24/
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
-│   └── diagramas.md
+│   ├── diagramas.md
+│   └── evaluation_results.json     # Métricas do evaluator (gerado no PR 04)
 ├── logs/
 ├── .env.example
 ├── .gitignore
@@ -140,13 +141,21 @@ tech-challenge-group-24/
 
 ### PR 03 — Banco de dados e dados de pacientes
 **Responsável:** Pessoa B  
-**Entrega:** SQLite com pacientes sintéticos pronto para consulta
+**Entrega:** SQLite com pacientes, exames, protocolos e histórico de consultas sintéticos
 
 - [ ] `src/database/models.py`
   - `Base` declarativa SQLAlchemy
   - Model `Patient`: `id`, `name_anon`, `age`, `blood_type`, `allergies`, `conditions`
   - Model `Exam`: `id`, `patient_id` (FK), `type`, `status` (pending/done), `result`, `date`
   - Model `Protocol`: `id`, `condition`, `cid_code`, `procedure`, `notes`
+  - Model `Consultation` (o "prontuário" que o enunciado cita — histórico clínico datado):
+    `id`, `patient_id` (FK), `date`, `chief_complaint` (queixa), `assessment` (avaliação),
+    `plan` (conduta), `physician_anon`
+    - `physician_anon` usa o token `[MÉDICO]` gerado pelo `anonymizer.py`, mantendo a
+      coerência de anonimização com o resto do projeto
+    - é o que dá dimensão temporal ao contexto: sem histórico não há como demonstrar as
+      "informações atualizadas do paciente" que o enunciado exige, nem dar ao assistente
+      uma fonte datada para citar (`[Fonte: consulta de DD/MM/AAAA]`)
   - Função `get_engine(db_path)` e `create_tables(engine)`
   - `get_engine` deve criar o diretório pai de `db_path` (`os.makedirs(..., exist_ok=True)`)
     antes de abrir a conexão — SQLite não cria o diretório e falha com
@@ -157,6 +166,8 @@ tech-challenge-group-24/
     - 20 pacientes com `name_anon` = `[PACIENTE_001]` ... `[PACIENTE_020]`
     - 2–4 exames por paciente (alguns com `status=pending`)
     - 8–10 protocolos hospitalares (um por condição CID-10)
+    - 2–3 consultas por paciente, em datas decrescentes (a mais recente primeiro), com
+      queixa/avaliação/conduta coerentes com as `conditions` daquele paciente
   - Executável diretamente: `python -m src.database.seed`
 
 - [ ] `tests/test_data.py` (adicionar ou criar `test_database.py`)
@@ -164,6 +175,8 @@ tech-challenge-group-24/
   - `test_exam_pending_query()` — filtra exames pendentes por paciente
   - `test_protocol_by_condition()` — busca protocolo por condição
   - `test_seed_populates_records()` — seed cria o número esperado de registros
+  - `test_consultations_ordered_by_date_desc()` — histórico do paciente vem da mais
+    recente para a mais antiga (é o que garante o "atualizadas" do contexto)
 
 **Dependências de outras PRs:** PR 01
 
@@ -293,8 +306,12 @@ tech-challenge-group-24/
   - Classe `PatientRetriever`:
     - `__init__(db_path)`: conecta ao SQLite via SQLAlchemy
     - `get_patient_context(patient_id)`:
-      - Retorna dict com dados do paciente, exames recentes e protocolos relevantes
-      - Formata como string para injetar no prompt
+      - Retorna dict com dados do paciente, exames recentes, protocolos relevantes e as
+        **2 consultas mais recentes** (queixa, avaliação, conduta e data)
+      - Formata como string para injetar no prompt, com a data de cada consulta visível —
+        é o que permite ao assistente citar `[Fonte: consulta de DD/MM/AAAA]`
+      - Sem método novo de propósito: o histórico entra no contexto que o PR 07 já monta,
+        evitando abrir superfície nova na interface do retriever
     - `get_pending_exams(patient_id)`: retorna lista de exames com `status=pending`
     - `get_protocols(condition)`: busca protocolos por condição clínica
 
@@ -387,7 +404,12 @@ tech-challenge-group-24/
   - Processo de fine-tuning (modelo, dados, técnica LoRA, hiperparâmetros)
   - Descrição do assistente médico e do pipeline LangChain
   - Diagrama do fluxo LangGraph (Mermaid)
-  - Métricas de avaliação do modelo (ROUGE-L, BLEU-4 — baseline vs fine-tuned)
+  - Avaliação do modelo: métricas ROUGE-L e BLEU-4, baseline vs fine-tuned
+    (números vindos de `docs/evaluation_results.json`)
+  - Análise dos resultados — o enunciado pede avaliação **e** análise, então não basta
+    tabelar: interpretar onde o fine-tuning melhorou e onde não, com exemplos de respostas
+    antes/depois, hipóteses para os casos ruins e limitações (tamanho do dataset, 3B
+    parâmetros, LoRA de 8 camadas)
   - Segurança: guardrails, logging, explainability
   - Conclusão e trabalhos futuros
 
@@ -421,7 +443,11 @@ tech-challenge-group-24/
   5. `python -m src.assistant.chain` (interativo)
 - [ ] Executar fluxo LangGraph: `python -m src.graph.clinical_flow`
 - [ ] Verificar `logs/audit.jsonl` com registros reais
-- [ ] Executar fine-tuning (pode ser rodado uma vez localmente e commitado o notebook executado)
+- [ ] Executar fine-tuning: `python -m src.fine_tuning.trainer` (pode ser rodado uma vez
+      localmente e commitado o notebook executado)
+- [ ] Executar a avaliação: `python -m src.fine_tuning.evaluator`
+  - confirmar que `docs/evaluation_results.json` foi gerado com as métricas baseline vs
+    fine-tuned — é a fonte dos números do relatório técnico e da demonstração do vídeo
 - [ ] Revisar todos os notebooks — garantir que estão executados com output visível
 - [ ] Revisão final do `docs/relatorio-tecnico.md`
 
@@ -444,6 +470,8 @@ Os quatro itens abaixo são exigidos explicitamente pelo enunciado e devem apare
 - [ ] Resposta a perguntas clínicas contextualizadas
   - consulta com `patient_id` mostrando o contexto do paciente injetado no prompt
     e a fonte citada na resposta
+  - fazer ao menos uma pergunta que só se responde com o histórico (ex.: "o que mudou
+    desde a última consulta?"), para evidenciar as "informações atualizadas do paciente"
 - [ ] Logs e validação das respostas
   - exibir `logs/audit.jsonl` com os registros da demo e o guardrail de prescrição sendo
     acionado (resposta marcada como `[Requer validação médica]`)
@@ -476,6 +504,8 @@ PR 01 (setup)
 |---|---|
 | Pipeline de fine-tuning | PR 04 |
 | Integração com LangChain | PR 07 |
+| Consulta a base estruturada (prontuários e registros) | PR 03 + PR 07 |
+| Contexto atualizado do paciente | PR 03 + PR 07 |
 | Fluxos do LangGraph | PR 08 |
 | Dataset anonimizado/sintético | PR 02 |
 | Relatório técnico detalhado | PR 09 |
