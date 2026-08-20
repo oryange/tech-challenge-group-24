@@ -32,6 +32,11 @@ data/database/*
 logs/*
 !logs/.gitkeep
 
+# data/processed/ e data/synthetic/ NÃO são ignorados de propósito: o dataset curado e
+# os registros sintéticos são entregáveis obrigatórios da Fase 3 ("dataset anonimizado ou
+# exemplo de dados sintéticos"), então precisam estar versionados. Todo o conteúdo é
+# sintético ou anonimizado — nunca commitar dado real de paciente aqui.
+
 # Jupyter checkpoints
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/

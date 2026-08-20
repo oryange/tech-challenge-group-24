@@ -1,7 +1,7 @@
 # Tech Challenge Fase 3 — Checklist de PRs
 
 > Assistente Médico com LLM Fine-tuned + LangChain + LangGraph  
-> Grupo 61 | MacBook Pro M3 24GB | Python 3.13
+> Grupo 24 | MacBook Pro M3 24GB | Python 3.13
 
 ---
 
@@ -84,7 +84,7 @@ tech-challenge-group-24/
   - Filtra subset `pqa_labeled`
   - Converte para formato instruction-tuning: `{"instruction", "input", "output", "source"}`
   - Salva em `data/processed/pubmedqa.jsonl`
-  - Executável diretamente: `python src/data/loader.py`
+  - Executável diretamente: `python -m src.data.loader`
 
 - [ ] `src/data/anonymizer.py`
   - Remove PII com regex: nomes, datas, CPF, telefones, emails
@@ -95,14 +95,14 @@ tech-challenge-group-24/
   - Gera ~100 registros sintéticos: protocolos CID-10, laudos e FAQs médicas
   - Usa templates com variação aleatória (sem dados reais)
   - Salva em `data/synthetic/synthetic_hospital.jsonl`
-  - Executável diretamente: `python src/data/synthetic_generator.py`
+  - Executável diretamente: `python -m src.data.synthetic_generator`
 
 - [ ] `src/data/curator.py`
   - Merge de `pubmedqa.jsonl` + `synthetic_hospital.jsonl`
   - Aplica anonimização em todos os registros
   - Remove duplicatas e filtra respostas muito curtas (<20 palavras)
   - Salva dataset final em `data/processed/dataset.jsonl`
-  - Executável diretamente: `python src/data/curator.py`
+  - Executável diretamente: `python -m src.data.curator`
 
 - [ ] `notebooks/01_data_preparation.ipynb`
   - Célula 1: carrega e exibe estatísticas do PubMedQA (total, distribuição de labels)
@@ -142,7 +142,7 @@ tech-challenge-group-24/
     - 20 pacientes com `name_anon` = `[PACIENTE_001]` ... `[PACIENTE_020]`
     - 2–4 exames por paciente (alguns com `status=pending`)
     - 8–10 protocolos hospitalares (um por condição CID-10)
-  - Executável diretamente: `python src/database/seed.py`
+  - Executável diretamente: `python -m src.database.seed`
 
 - [ ] `tests/test_data.py` (adicionar ou criar `test_database.py`)
   - `test_patient_creation()` — cria paciente e recupera do banco
@@ -177,7 +177,7 @@ tech-challenge-group-24/
     - Chama `_prepare_mlx_data`
     - Executa `python -m mlx_lm.lora` via `subprocess` com os args do config
     - Salva adapters em `data/fine_tuned/adapters/`
-  - Executável diretamente: `python src/fine_tuning/trainer.py`
+  - Executável diretamente: `python -m src.fine_tuning.trainer`
 
 - [ ] `src/fine_tuning/evaluator.py`
   - Função `evaluate(model_path, adapter_path, test_samples)`:
@@ -186,7 +186,7 @@ tech-challenge-group-24/
     - Retorna dict com métricas
   - Função `save_results(metrics, path)`:
     - Salva em `docs/evaluation_results.json`
-  - Executável diretamente: `python src/fine_tuning/evaluator.py`
+  - Executável diretamente: `python -m src.fine_tuning.evaluator`
 
 - [ ] `notebooks/02_fine_tuning.ipynb`
   - Célula 1: instala dependências, configura `LoRAConfig`
@@ -296,7 +296,7 @@ tech-challenge-group-24/
       7. Loga via audit_logger
       8. Retorna `{"response", "source", "guardrail_triggered", "patient_context_used"}`
     - `create_chain(llm)`: retorna `LLMChain` com `ConversationBufferMemory`
-  - Executável interativo: `python src/assistant/chain.py`
+  - Executável interativo: `python -m src.assistant.chain`
 
 - [ ] `tests/test_chain.py`
   - `test_ask_returns_required_fields()` — resposta tem todos os campos
@@ -338,7 +338,7 @@ tech-challenge-group-24/
     - Retorna grafo compilado
 
   - `run_clinical_flow(patient_id, session_id)`: executa o grafo e retorna estado final
-  - Executável: `python src/graph/clinical_flow.py`
+  - Executável: `python -m src.graph.clinical_flow`
 
 - [ ] `tests/test_graph.py`
   - `test_intake_node_loads_patient()` — paciente carregado corretamente
@@ -399,16 +399,42 @@ tech-challenge-group-24/
 
 - [ ] Rodar `pytest tests/` — todos os testes passam (exceto `@integration`)
 - [ ] Executar o pipeline completo de ponta a ponta:
-  1. `python src/data/loader.py`
-  2. `python src/data/synthetic_generator.py`
-  3. `python src/data/curator.py`
-  4. `python src/database/seed.py`
-  5. `python src/assistant/chain.py` (interativo)
-- [ ] Executar fluxo LangGraph: `python src/graph/clinical_flow.py`
+  1. `python -m src.data.loader`
+  2. `python -m src.data.synthetic_generator`
+  3. `python -m src.data.curator`
+  4. `python -m src.database.seed`
+  5. `python -m src.assistant.chain` (interativo)
+- [ ] Executar fluxo LangGraph: `python -m src.graph.clinical_flow`
 - [ ] Verificar `logs/audit.jsonl` com registros reais
 - [ ] Executar fine-tuning (pode ser rodado uma vez localmente e commitado o notebook executado)
 - [ ] Revisar todos os notebooks — garantir que estão executados com output visível
 - [ ] Revisão final do `docs/relatorio-tecnico.md`
+
+---
+
+### PR 11 — Vídeo de demonstração
+**Responsável:** Pessoa A e B juntas
+**Entrega:** vídeo de até 15 minutos (entregável obrigatório da Fase 3)
+
+> **Pré-requisito:** PR 10 concluído — o vídeo grava o sistema já funcionando de ponta a ponta
+
+Os quatro itens abaixo são exigidos explicitamente pelo enunciado e devem aparecer no vídeo:
+
+- [ ] Treinamento e funcionamento da LLM personalizada
+  - mostrar o fine-tuning (pode ser execução gravada ou o notebook `02_fine_tuning.ipynb`
+    com as curvas de loss e as métricas ROUGE-L/BLEU-4)
+- [ ] Execução de um fluxo automatizado
+  - rodar `python -m src.graph.clinical_flow` e mostrar o caminho condicional do LangGraph
+    (exames pendentes → alerta, sem pendências → sugestão de conduta)
+- [ ] Resposta a perguntas clínicas contextualizadas
+  - consulta com `patient_id` mostrando o contexto do paciente injetado no prompt
+    e a fonte citada na resposta
+- [ ] Logs e validação das respostas
+  - exibir `logs/audit.jsonl` com os registros da demo e o guardrail de prescrição sendo
+    acionado (resposta marcada como `[Requer validação médica]`)
+
+- [ ] Duração final ≤ 15 minutos
+- [ ] Link do vídeo adicionado ao `README.md` e ao `docs/relatorio-tecnico.md`
 
 ---
 
@@ -420,7 +446,7 @@ PR 01 (setup)
   ├── PR 03 (banco)        ↗
   ├── PR 05 (LLM/guardrails)  →  PR 07 (LangChain)  →  PR 09
   ├── PR 06 (audit logger)    →  PR 08 (LangGraph)   →  PR 09
-  └──────────────────────────────────────────────── PR 10 (integração final)
+  └──────────────────────────────────────────────── PR 10 (integração final) → PR 11 (vídeo)
 ```
 
 **Paralelismo possível após PR 01:**
@@ -438,8 +464,9 @@ PR 01 (setup)
 | Fluxos do LangGraph | PR 08 |
 | Dataset anonimizado/sintético | PR 02 |
 | Relatório técnico detalhado | PR 09 |
-| Diagrama do fluxo LangChain | PR 09 |
-| Avaliação do modelo | PR 04 |
+| Diagrama do fluxo LangGraph | PR 09 |
+| Avaliação do modelo e análise dos resultados | PR 04 + PR 09 |
 | Logging e auditoria | PR 06 |
-| Guardrails e limites | PR 05 |
+| Guardrails e limites (nunca prescrever sem validação humana) | PR 05 + PR 08 |
 | Explainability (citação de fonte) | PR 05 + PR 07 |
+| Vídeo de até 15 minutos | PR 11 |

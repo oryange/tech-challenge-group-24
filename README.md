@@ -97,9 +97,9 @@ pytest tests/ -v; echo "exit code: $?"
 > **Nota:** Os três comandos acima devem passar já no PR 01 — eles só checam dependências,
 > pacotes e a coleta do pytest. O que ainda **não** funciona são os comandos da seção
 > seguinte: os módulos dentro de `src/` são implementados incrementalmente por PR, então
-> até o PR 02 ser mergeado `python src/data/loader.py` falha com
-> `No such file or directory` (o arquivo ainda não existe) e um `from src.data import loader`
-> falha com `cannot import name 'loader' from 'src.data'`.
+> até o PR 02 ser mergeado `python -m src.data.loader` falha com
+> `No module named src.data.loader` (o módulo ainda não existe) e um
+> `from src.data import loader` falha com `cannot import name 'loader' from 'src.data'`.
 
 <!-- separador: mantém as duas notas como blocos distintos (markdownlint MD028) -->
 
@@ -110,27 +110,31 @@ pytest tests/ -v; echo "exit code: $?"
 
 ## Como executar o pipeline completo
 
+Rode sempre a partir da raiz do repositório e na forma `python -m pacote.modulo`, nunca
+`python src/pacote/modulo.py`: a segunda forma coloca o diretório do arquivo no `sys.path`
+em vez da raiz, e qualquer `import src...` interno quebra com `No module named 'src'`.
+
 ```bash
 # 1. Baixar e processar PubMedQA
-python src/data/loader.py
+python -m src.data.loader
 
 # 2. Gerar dados sintéticos hospitalares
-python src/data/synthetic_generator.py
+python -m src.data.synthetic_generator
 
 # 3. Curar e unificar o dataset
-python src/data/curator.py
+python -m src.data.curator
 
 # 4. Fine-tuning do modelo (requer Apple Silicon)
-python src/fine_tuning/trainer.py
+python -m src.fine_tuning.trainer
 
 # 5. Popular banco de dados com pacientes sintéticos
-python src/database/seed.py
+python -m src.database.seed
 
 # 6. Iniciar assistente médico interativo
-python src/assistant/chain.py
+python -m src.assistant.chain
 
 # 7. Executar fluxo LangGraph
-python src/graph/clinical_flow.py
+python -m src.graph.clinical_flow
 ```
 
 ## Testes
@@ -177,4 +181,7 @@ tech-challenge-group-24/
 
 ## Equipe
 
-Grupo 61 — POSTECH IA
+Grupo 24 — Pós-graduação em IA (POSTECH)
+
+- Oryange Strifezze
+- Larissa Nunes
