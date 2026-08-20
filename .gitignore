@@ -18,13 +18,19 @@ venv/
 .venv/
 env/
 
-# Dados pesados / gerados localmente
-data/raw/
-data/fine_tuned/
-data/database/
+# Dados pesados / gerados localmente.
+# Ignora o conteúdo mas versiona o .gitkeep, senão o diretório não existe após um
+# clone limpo e DB_PATH / ADAPTER_PATH quebram (SQLite: "unable to open database file").
+data/raw/*
+!data/raw/.gitkeep
+data/fine_tuned/*
+!data/fine_tuned/.gitkeep
+data/database/*
+!data/database/.gitkeep
 
-# Logs de auditoria (contêm queries de pacientes)
-logs/
+# Logs de auditoria (contêm queries de pacientes): mesmo caso para AUDIT_LOG_PATH
+logs/*
+!logs/.gitkeep
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
@@ -36,6 +42,7 @@ notebooks/.ipynb_checkpoints/
 # IDE
 .vscode/
 .idea/
+.claude/settings.local.json
 
 # pytest cache
 .pytest_cache/

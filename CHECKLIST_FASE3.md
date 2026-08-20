@@ -22,7 +22,7 @@
 ## Estrutura de pastas do projeto
 
 ```
-tech-challenge-fase3/
+tech-challenge-group-24/
 ├── data/
 │   ├── raw/                        # PubMedQA baixado
 │   ├── processed/                  # Dataset curado para fine-tuning (JSONL)
@@ -40,7 +40,7 @@ tech-challenge-fase3/
 │   ├── assistant/                  # LangChain pipeline
 │   ├── graph/                      # LangGraph flow
 │   ├── database/                   # SQLAlchemy models + seed
-│   └── logging/                    # Audit logger
+│   └── audit/                      # Audit logger (evita sombrear o `logging` da stdlib)
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
@@ -61,7 +61,7 @@ tech-challenge-fase3/
 **Entrega:** repositório inicial pronto para desenvolvimento  
 **Branch:** `feat/pr01-setup-projeto`
 
-- [x] Criar repositório `tech-challenge-fase3` no GitHub
+- [x] Criar repositório `tech-challenge-group-24` no GitHub
 - [x] Criar estrutura de pastas conforme acima
 - [x] Criar `requirements.txt` com todas as dependências
 - [x] Criar `.env.example` com as variáveis de ambiente
@@ -133,6 +133,9 @@ tech-challenge-fase3/
   - Model `Exam`: `id`, `patient_id` (FK), `type`, `status` (pending/done), `result`, `date`
   - Model `Protocol`: `id`, `condition`, `cid_code`, `procedure`, `notes`
   - Função `get_engine(db_path)` e `create_tables(engine)`
+  - `get_engine` deve criar o diretório pai de `db_path` (`os.makedirs(..., exist_ok=True)`)
+    antes de abrir a conexão — SQLite não cria o diretório e falha com
+    `unable to open database file` se `DB_PATH` apontar para um caminho novo
 
 - [ ] `src/database/seed.py`
   - Cria e popula o banco com dados sintéticos (sem PII real):
@@ -238,9 +241,11 @@ tech-challenge-fase3/
 **Responsável:** Pessoa A ou B  
 **Entrega:** sistema de logging estruturado para auditoria
 
-- [ ] `src/logging/audit_logger.py`
+- [ ] `src/audit/audit_logger.py`
   - Classe `AuditLogger`:
-    - `__init__(log_path)`: inicializa com path do arquivo JSONL
+    - `__init__(log_path)`: inicializa com path do arquivo JSONL e cria o diretório pai
+      (`os.makedirs(..., exist_ok=True)`) — sem isso, um `AUDIT_LOG_PATH` em diretório
+      inexistente estoura `FileNotFoundError` na primeira escrita
     - `log(query, response, patient_id, source, guardrail_triggered, session_id)`:
       - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered"}`
     - `get_session_logs(session_id)`: retorna todos os logs de uma sessão
