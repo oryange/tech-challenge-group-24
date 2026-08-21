@@ -1,0 +1,55 @@
+# Environment
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual env
+venv/
+.venv/
+env/
+
+# Dados pesados / gerados localmente.
+# Ignora o conteúdo mas versiona o .gitkeep, senão o diretório não existe após um
+# clone limpo e DB_PATH / ADAPTER_PATH quebram (SQLite: "unable to open database file").
+data/raw/*
+!data/raw/.gitkeep
+data/fine_tuned/*
+!data/fine_tuned/.gitkeep
+data/database/*
+!data/database/.gitkeep
+
+# Logs de auditoria (contêm queries de pacientes): mesmo caso para AUDIT_LOG_PATH
+logs/*
+!logs/.gitkeep
+
+# data/processed/ e data/synthetic/ NÃO são ignorados de propósito: o dataset curado e
+# os registros sintéticos são entregáveis obrigatórios da Fase 3 ("dataset anonimizado ou
+# exemplo de dados sintéticos"), então precisam estar versionados. Todo o conteúdo é
+# sintético ou anonimizado — nunca commitar dado real de paciente aqui.
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# pytest cache
+.pytest_cache/
+.coverage
+htmlcov/

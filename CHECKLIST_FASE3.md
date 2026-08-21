@@ -1,7 +1,7 @@
 # Tech Challenge Fase 3 — Checklist de PRs
 
 > Assistente Médico com LLM Fine-tuned + LangChain + LangGraph  
-> Grupo 61 | MacBook Pro M3 24GB | Python 3.13
+> Grupo 24 | Requer Python 3.11+ (máquina de desenvolvimento: MacBook Pro M3 24GB, Python 3.13)
 
 ---
 
@@ -22,13 +22,13 @@
 ## Estrutura de pastas do projeto
 
 ```
-tech-challenge-fase3/
+tech-challenge-group-24/
 ├── data/
 │   ├── raw/                        # PubMedQA baixado
 │   ├── processed/                  # Dataset curado para fine-tuning (JSONL)
 │   ├── synthetic/                  # Protocolos e laudos sintéticos
 │   ├── database/                   # SQLite com pacientes sintéticos
-│   └── fine_tuned/adapters/        # Pesos LoRA após fine-tuning
+│   └── fine_tuned/adapters/        # Pesos LoRA após fine-tuning (ADAPTER_PATH)
 ├── notebooks/
 │   ├── 01_data_preparation.ipynb
 │   ├── 02_fine_tuning.ipynb
@@ -40,15 +40,21 @@ tech-challenge-fase3/
 │   ├── assistant/                  # LangChain pipeline
 │   ├── graph/                      # LangGraph flow
 │   ├── database/                   # SQLAlchemy models + seed
-│   └── logging/                    # Audit logger
+│   └── audit/                      # Audit logger (evita sombrear o `logging` da stdlib)
+├── scripts/
+│   └── check_env.py                # Verificação de ambiente (exit 0/1, usável em CI)
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
-│   └── diagrama-langchain.md
+│   ├── diagramas.md
+│   └── evaluation_results.json     # Métricas do evaluator (gerado no PR 04)
 ├── logs/
 ├── .env.example
+├── .gitignore
+├── .pre-commit-config.yaml
 ├── requirements.txt
 ├── pytest.ini
+├── CHECKLIST_FASE3.md
 └── README.md
 ```
 
@@ -56,19 +62,28 @@ tech-challenge-fase3/
 
 ## PRs — Divisão de trabalho
 
-### PR 01 — Setup do projeto
+### PR 01 — Setup do projeto ✅
 **Responsável:** qualquer uma  
-**Entrega:** repositório inicial pronto para desenvolvimento
+**Entrega:** repositório inicial pronto para desenvolvimento  
+**Branch:** `feat/pr01-setup-projeto`
 
-- [ ] Criar repositório `tech-challenge-fase3` no GitHub
-- [ ] Criar estrutura de pastas conforme acima
-- [ ] Criar `requirements.txt` com todas as dependências
-- [ ] Criar `.env.example` com as variáveis de ambiente
-- [ ] Criar `pytest.ini`
-- [ ] Criar todos os `__init__.py` dos pacotes em `src/`
-- [ ] Criar `README.md` inicial (pode ser esqueleto, será completado depois)
-- [ ] Criar `tests/__init__.py`
-- [ ] Adicionar `.gitignore` (ignorar `data/raw/`, `data/fine_tuned/`, `logs/`, `.env`, `__pycache__`)
+- [x] Criar repositório `tech-challenge-group-24` no GitHub
+- [x] Criar estrutura de pastas conforme acima
+- [x] Criar `requirements.txt` com todas as dependências
+- [x] Criar `.env.example` com as variáveis de ambiente
+- [x] Criar `pytest.ini`
+- [x] Criar todos os `__init__.py` dos pacotes em `src/`
+- [x] Criar `README.md` inicial (pode ser esqueleto, será completado depois)
+- [x] Criar `tests/__init__.py`
+- [x] Adicionar `.gitignore` (ignorar `data/raw/`, `data/fine_tuned/`, `data/database/`,
+      `logs/`, `.env`, `__pycache__` — com `.gitkeep` versionado em cada um deles;
+      `data/processed/` e `data/synthetic/` ficam versionados de propósito, são entregáveis)
+- [x] Adicionar `.pre-commit-config.yaml` (hoje `repos: []` — sem hooks; existe para não
+      bloquear commits em quem tem o pre-commit instalado globalmente)
+- [x] Criar `scripts/check_env.py` — verificação de ambiente com exit 0/1
+      (`python -m scripts.check_env`): venv ativo, versões das dependências, pacotes de
+      `src/`, APIs que cada PR usa, ausência das APIs legadas do LangChain 0.x, MLX na GPU
+      e variáveis do `.env`. Rodar isto antes de começar qualquer PR
 
 **Dependências de outras PRs:** nenhuma — deve ser a primeira
 
@@ -83,7 +98,7 @@ tech-challenge-fase3/
   - Filtra subset `pqa_labeled`
   - Converte para formato instruction-tuning: `{"instruction", "input", "output", "source"}`
   - Salva em `data/processed/pubmedqa.jsonl`
-  - Executável diretamente: `python src/data/loader.py`
+  - Executável diretamente: `python -m src.data.loader`
 
 - [ ] `src/data/anonymizer.py`
   - Remove PII com regex: nomes, datas, CPF, telefones, emails
@@ -91,17 +106,25 @@ tech-challenge-fase3/
   - Funções: `anonymize(text)` e `anonymize_record(dict)`
 
 - [ ] `src/data/synthetic_generator.py`
-  - Gera ~100 registros sintéticos: protocolos CID-10, laudos e FAQs médicas
+  - Gera ~100 registros sintéticos cobrindo os quatro tipos exigidos pelo enunciado
+    ("protocolos médicos do hospital; exemplos de perguntas frequentes feitas por médicos;
+    modelos de laudos, receitas e procedimentos internos"):
+    - protocolos CID-10
+    - FAQs médicas
+    - modelos de laudo
+    - modelos de receita e de procedimento interno (posologia sempre fictícia, com o
+      disclaimer de validação humana — o assistente nunca prescreve por conta própria)
   - Usa templates com variação aleatória (sem dados reais)
+  - Campo `source` identifica o tipo do registro, para o assistente citar a fonte depois
   - Salva em `data/synthetic/synthetic_hospital.jsonl`
-  - Executável diretamente: `python src/data/synthetic_generator.py`
+  - Executável diretamente: `python -m src.data.synthetic_generator`
 
 - [ ] `src/data/curator.py`
   - Merge de `pubmedqa.jsonl` + `synthetic_hospital.jsonl`
   - Aplica anonimização em todos os registros
   - Remove duplicatas e filtra respostas muito curtas (<20 palavras)
   - Salva dataset final em `data/processed/dataset.jsonl`
-  - Executável diretamente: `python src/data/curator.py`
+  - Executável diretamente: `python -m src.data.curator`
 
 - [ ] `notebooks/01_data_preparation.ipynb`
   - Célula 1: carrega e exibe estatísticas do PubMedQA (total, distribuição de labels)
@@ -124,27 +147,42 @@ tech-challenge-fase3/
 
 ### PR 03 — Banco de dados e dados de pacientes
 **Responsável:** Pessoa B  
-**Entrega:** SQLite com pacientes sintéticos pronto para consulta
+**Entrega:** SQLite com pacientes, exames, protocolos e histórico de consultas sintéticos
 
 - [ ] `src/database/models.py`
   - `Base` declarativa SQLAlchemy
   - Model `Patient`: `id`, `name_anon`, `age`, `blood_type`, `allergies`, `conditions`
   - Model `Exam`: `id`, `patient_id` (FK), `type`, `status` (pending/done), `result`, `date`
   - Model `Protocol`: `id`, `condition`, `cid_code`, `procedure`, `notes`
+  - Model `Consultation` (o "prontuário" que o enunciado cita — histórico clínico datado):
+    `id`, `patient_id` (FK), `date`, `chief_complaint` (queixa), `assessment` (avaliação),
+    `plan` (conduta), `physician_anon`
+    - `physician_anon` usa o token `[MÉDICO]` gerado pelo `anonymizer.py`, mantendo a
+      coerência de anonimização com o resto do projeto
+    - é o que dá dimensão temporal ao contexto: sem histórico não há como demonstrar as
+      "informações atualizadas do paciente" que o enunciado exige, nem dar ao assistente
+      uma fonte datada para citar (`[Fonte: consulta de DD/MM/AAAA]`)
   - Função `get_engine(db_path)` e `create_tables(engine)`
+  - `get_engine` deve criar o diretório pai de `db_path` (`os.makedirs(..., exist_ok=True)`)
+    antes de abrir a conexão — SQLite não cria o diretório e falha com
+    `unable to open database file` se `DB_PATH` apontar para um caminho novo
 
 - [ ] `src/database/seed.py`
   - Cria e popula o banco com dados sintéticos (sem PII real):
     - 20 pacientes com `name_anon` = `[PACIENTE_001]` ... `[PACIENTE_020]`
     - 2–4 exames por paciente (alguns com `status=pending`)
     - 8–10 protocolos hospitalares (um por condição CID-10)
-  - Executável diretamente: `python src/database/seed.py`
+    - 2–3 consultas por paciente, em datas decrescentes (a mais recente primeiro), com
+      queixa/avaliação/conduta coerentes com as `conditions` daquele paciente
+  - Executável diretamente: `python -m src.database.seed`
 
 - [ ] `tests/test_data.py` (adicionar ou criar `test_database.py`)
   - `test_patient_creation()` — cria paciente e recupera do banco
   - `test_exam_pending_query()` — filtra exames pendentes por paciente
   - `test_protocol_by_condition()` — busca protocolo por condição
   - `test_seed_populates_records()` — seed cria o número esperado de registros
+  - `test_consultations_ordered_by_date_desc()` — histórico do paciente vem da mais
+    recente para a mais antiga (é o que garante o "atualizadas" do contexto)
 
 **Dependências de outras PRs:** PR 01
 
@@ -173,7 +211,7 @@ tech-challenge-fase3/
     - Chama `_prepare_mlx_data`
     - Executa `python -m mlx_lm.lora` via `subprocess` com os args do config
     - Salva adapters em `data/fine_tuned/adapters/`
-  - Executável diretamente: `python src/fine_tuning/trainer.py`
+  - Executável diretamente: `python -m src.fine_tuning.trainer`
 
 - [ ] `src/fine_tuning/evaluator.py`
   - Função `evaluate(model_path, adapter_path, test_samples)`:
@@ -182,7 +220,7 @@ tech-challenge-fase3/
     - Retorna dict com métricas
   - Função `save_results(metrics, path)`:
     - Salva em `docs/evaluation_results.json`
-  - Executável diretamente: `python src/fine_tuning/evaluator.py`
+  - Executável diretamente: `python -m src.fine_tuning.evaluator`
 
 - [ ] `notebooks/02_fine_tuning.ipynb`
   - Célula 1: instala dependências, configura `LoRAConfig`
@@ -201,7 +239,10 @@ tech-challenge-fase3/
 **Entrega:** classe LLM compatível com LangChain + sistema de guardrails
 
 - [ ] `src/llm/model.py`
-  - Classe `MedicalMLXLLM(LLM)` herdando de `langchain_core.language_models.llm.LLM`
+  - Classe `MedicalMLXLLM(LLM)` herdando de `langchain_core.language_models.llms.LLM`
+    (LangChain 1.x — confirmar o caminho do import com
+    `python -c "from langchain_core.language_models.llms import LLM; print('ok')"`
+    antes de escrever o resto da classe)
   - `_llm_type = "medical-mlx"`
   - `_call(prompt, stop, run_manager)`: chama `mlx_lm.generate` com adapter carregado
   - `_identifying_params`: expõe `model_path` e `adapter_path`
@@ -237,9 +278,11 @@ tech-challenge-fase3/
 **Responsável:** Pessoa A ou B  
 **Entrega:** sistema de logging estruturado para auditoria
 
-- [ ] `src/logging/audit_logger.py`
+- [ ] `src/audit/audit_logger.py`
   - Classe `AuditLogger`:
-    - `__init__(log_path)`: inicializa com path do arquivo JSONL
+    - `__init__(log_path)`: inicializa com path do arquivo JSONL e cria o diretório pai
+      (`os.makedirs(..., exist_ok=True)`) — sem isso, um `AUDIT_LOG_PATH` em diretório
+      inexistente estoura `FileNotFoundError` na primeira escrita
     - `log(query, response, patient_id, source, guardrail_triggered, session_id)`:
       - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered"}`
     - `get_session_logs(session_id)`: retorna todos os logs de uma sessão
@@ -272,8 +315,12 @@ tech-challenge-fase3/
   - Classe `PatientRetriever`:
     - `__init__(db_path)`: conecta ao SQLite via SQLAlchemy
     - `get_patient_context(patient_id)`:
-      - Retorna dict com dados do paciente, exames recentes e protocolos relevantes
-      - Formata como string para injetar no prompt
+      - Retorna dict com dados do paciente, exames recentes, protocolos relevantes e as
+        **2 consultas mais recentes** (queixa, avaliação, conduta e data)
+      - Formata como string para injetar no prompt, com a data de cada consulta visível —
+        é o que permite ao assistente citar `[Fonte: consulta de DD/MM/AAAA]`
+      - Sem método novo de propósito: o histórico entra no contexto que o PR 07 já monta,
+        evitando abrir superfície nova na interface do retriever
     - `get_pending_exams(patient_id)`: retorna lista de exames com `status=pending`
     - `get_protocols(condition)`: busca protocolos por condição clínica
 
@@ -285,12 +332,17 @@ tech-challenge-fase3/
       2. Recupera contexto do paciente via `retriever`
       3. Checa prescrição via guardrails
       4. Monta prompt com `build_prompt`
-      5. Chama LLM via LangChain chain
+      5. Invoca a chain LCEL (`chain.invoke({...})`)
       6. Valida resposta via guardrails
       7. Loga via audit_logger
       8. Retorna `{"response", "source", "guardrail_triggered", "patient_context_used"}`
-    - `create_chain(llm)`: retorna `LLMChain` com `ConversationBufferMemory`
-  - Executável interativo: `python src/assistant/chain.py`
+    - `create_chain(llm)`: monta a chain no estilo **LCEL** do LangChain 1.x —
+      `prompt | llm`, envolvida em `RunnableWithMessageHistory` para o histórico da conversa
+      (`InMemoryChatMessageHistory` por `session_id`)
+      - `LLMChain` e `ConversationBufferMemory` **não** existem mais no pacote principal do
+        LangChain 1.x: foram para o `langchain-classic`. Não usar — o projeto fica preso à
+        linha 0.3 e o pip rebaixa todo o ecossistema em volta
+  - Executável interativo: `python -m src.assistant.chain`
 
 - [ ] `tests/test_chain.py`
   - `test_ask_returns_required_fields()` — resposta tem todos os campos
@@ -332,7 +384,7 @@ tech-challenge-fase3/
     - Retorna grafo compilado
 
   - `run_clinical_flow(patient_id, session_id)`: executa o grafo e retorna estado final
-  - Executável: `python src/graph/clinical_flow.py`
+  - Executável: `python -m src.graph.clinical_flow`
 
 - [ ] `tests/test_graph.py`
   - `test_intake_node_loads_patient()` — paciente carregado corretamente
@@ -366,11 +418,16 @@ tech-challenge-fase3/
   - Processo de fine-tuning (modelo, dados, técnica LoRA, hiperparâmetros)
   - Descrição do assistente médico e do pipeline LangChain
   - Diagrama do fluxo LangGraph (Mermaid)
-  - Métricas de avaliação do modelo (ROUGE-L, BLEU-4 — baseline vs fine-tuned)
+  - Avaliação do modelo: métricas ROUGE-L e BLEU-4, baseline vs fine-tuned
+    (números vindos de `docs/evaluation_results.json`)
+  - Análise dos resultados — o enunciado pede avaliação **e** análise, então não basta
+    tabelar: interpretar onde o fine-tuning melhorou e onde não, com exemplos de respostas
+    antes/depois, hipóteses para os casos ruins e limitações (tamanho do dataset, 3B
+    parâmetros, LoRA de 8 camadas)
   - Segurança: guardrails, logging, explainability
   - Conclusão e trabalhos futuros
 
-- [ ] `docs/diagrama-langchain.md`
+- [ ] `docs/diagramas.md`
   - Diagrama Mermaid do pipeline LangChain
   - Diagrama Mermaid do fluxo LangGraph
 
@@ -393,16 +450,48 @@ tech-challenge-fase3/
 
 - [ ] Rodar `pytest tests/` — todos os testes passam (exceto `@integration`)
 - [ ] Executar o pipeline completo de ponta a ponta:
-  1. `python src/data/loader.py`
-  2. `python src/data/synthetic_generator.py`
-  3. `python src/data/curator.py`
-  4. `python src/database/seed.py`
-  5. `python src/assistant/chain.py` (interativo)
-- [ ] Executar fluxo LangGraph: `python src/graph/clinical_flow.py`
+  1. `python -m src.data.loader`
+  2. `python -m src.data.synthetic_generator`
+  3. `python -m src.data.curator`
+  4. `python -m src.database.seed`
+  5. `python -m src.assistant.chain` (interativo)
+- [ ] Executar fluxo LangGraph: `python -m src.graph.clinical_flow`
 - [ ] Verificar `logs/audit.jsonl` com registros reais
-- [ ] Executar fine-tuning (pode ser rodado uma vez localmente e commitado o notebook executado)
+- [ ] Executar fine-tuning: `python -m src.fine_tuning.trainer` (pode ser rodado uma vez
+      localmente e commitado o notebook executado)
+- [ ] Executar a avaliação: `python -m src.fine_tuning.evaluator`
+  - confirmar que `docs/evaluation_results.json` foi gerado com as métricas baseline vs
+    fine-tuned — é a fonte dos números do relatório técnico e da demonstração do vídeo
 - [ ] Revisar todos os notebooks — garantir que estão executados com output visível
 - [ ] Revisão final do `docs/relatorio-tecnico.md`
+
+---
+
+### PR 11 — Vídeo de demonstração
+**Responsável:** Pessoa A e B juntas
+**Entrega:** vídeo de até 15 minutos (entregável obrigatório da Fase 3)
+
+> **Pré-requisito:** PR 10 concluído — o vídeo grava o sistema já funcionando de ponta a ponta
+
+Os quatro itens abaixo são exigidos explicitamente pelo enunciado e devem aparecer no vídeo:
+
+- [ ] Treinamento e funcionamento da LLM personalizada
+  - mostrar o fine-tuning (pode ser execução gravada ou o notebook `02_fine_tuning.ipynb`
+    com as curvas de loss e as métricas ROUGE-L/BLEU-4)
+- [ ] Execução de um fluxo automatizado
+  - rodar `python -m src.graph.clinical_flow` e mostrar o caminho condicional do LangGraph
+    (exames pendentes → alerta, sem pendências → sugestão de conduta)
+- [ ] Resposta a perguntas clínicas contextualizadas
+  - consulta com `patient_id` mostrando o contexto do paciente injetado no prompt
+    e a fonte citada na resposta
+  - fazer ao menos uma pergunta que só se responde com o histórico (ex.: "o que mudou
+    desde a última consulta?"), para evidenciar as "informações atualizadas do paciente"
+- [ ] Logs e validação das respostas
+  - exibir `logs/audit.jsonl` com os registros da demo e o guardrail de prescrição sendo
+    acionado (resposta marcada como `[Requer validação médica]`)
+
+- [ ] Duração final ≤ 15 minutos
+- [ ] Link do vídeo adicionado ao `README.md` e ao `docs/relatorio-tecnico.md`
 
 ---
 
@@ -414,7 +503,7 @@ PR 01 (setup)
   ├── PR 03 (banco)        ↗
   ├── PR 05 (LLM/guardrails)  →  PR 07 (LangChain)  →  PR 09
   ├── PR 06 (audit logger)    →  PR 08 (LangGraph)   →  PR 09
-  └──────────────────────────────────────────────── PR 10 (integração final)
+  └──────────────────────────────────────────────── PR 10 (integração final) → PR 11 (vídeo)
 ```
 
 **Paralelismo possível após PR 01:**
@@ -429,11 +518,14 @@ PR 01 (setup)
 |---|---|
 | Pipeline de fine-tuning | PR 04 |
 | Integração com LangChain | PR 07 |
+| Consulta a base estruturada (prontuários e registros) | PR 03 + PR 07 |
+| Contexto atualizado do paciente | PR 03 + PR 07 |
 | Fluxos do LangGraph | PR 08 |
 | Dataset anonimizado/sintético | PR 02 |
 | Relatório técnico detalhado | PR 09 |
-| Diagrama do fluxo LangChain | PR 09 |
-| Avaliação do modelo | PR 04 |
+| Diagrama do fluxo LangGraph | PR 09 |
+| Avaliação do modelo e análise dos resultados | PR 04 + PR 09 |
 | Logging e auditoria | PR 06 |
-| Guardrails e limites | PR 05 |
+| Guardrails e limites (nunca prescrever sem validação humana) | PR 05 + PR 08 |
 | Explainability (citação de fonte) | PR 05 + PR 07 |
+| Vídeo de até 15 minutos | PR 11 |
