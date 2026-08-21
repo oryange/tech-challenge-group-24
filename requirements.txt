@@ -3,13 +3,16 @@
 # Em pacotes 0.x o teto é <1.0.0, já que a linha 0.x é onde a API ainda muda.
 
 # mlx só tem wheels para macOS/Apple Silicon — em Linux/x86 e no CI a instalação é ignorada
-mlx-lm>=0.22.0,<1.0.0; sys_platform == 'darwin' and platform_machine == 'arm64'
+mlx-lm>=0.31.0,<1.0.0; sys_platform == 'darwin' and platform_machine == 'arm64'
 
-langchain>=0.3.0,<1.0.0
-langchain-community>=0.3.0,<1.0.0
-langgraph>=0.2.0,<1.0.0
+# Linha 1.x do LangChain: o pipeline usa LCEL (prompt | llm) e RunnableWithMessageHistory.
+# Não baixar para <1.0.0 — LLMChain e ConversationBufferMemory saíram para langchain-classic,
+# e pinar a linha 0.3 obriga o pip a rebaixar todo o ecossistema em volta.
+langchain>=1.0.0,<2.0.0
+langchain-community>=0.4.0,<1.0.0
+langgraph>=1.0.0,<2.0.0
 sqlalchemy>=2.0.0,<3.0.0
-datasets>=2.20.0,<3.0.0
+datasets>=5.0.0,<6.0.0
 evaluate>=0.4.0,<1.0.0
 nltk>=3.8.0,<4.0.0
 rouge-score>=0.1.2,<1.0.0
@@ -20,10 +23,10 @@ pytest-mock>=3.14.0,<4.0.0
 # numpy fica aberto ao 2.x de propósito: numpy<2 não tem wheels para Python 3.13+
 numpy>=1.26.0,<3.0.0
 pandas>=2.0.0,<3.0.0
-huggingface-hub>=0.24.0,<1.0.0
+huggingface-hub>=1.0.0,<2.0.0
 
 # Notebooks: os três .ipynb são entregáveis da Fase 3, então o ambiente para executá-los
 # faz parte do setup. matplotlib é usado nas curvas de loss do 02_fine_tuning.ipynb.
 jupyterlab>=4.0.0,<5.0.0
-ipykernel>=6.29.0,<7.0.0
+ipykernel>=7.0.0,<8.0.0
 matplotlib>=3.8.0,<4.0.0

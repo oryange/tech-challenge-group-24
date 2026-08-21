@@ -233,7 +233,10 @@ tech-challenge-group-24/
 **Entrega:** classe LLM compatível com LangChain + sistema de guardrails
 
 - [ ] `src/llm/model.py`
-  - Classe `MedicalMLXLLM(LLM)` herdando de `langchain_core.language_models.llm.LLM`
+  - Classe `MedicalMLXLLM(LLM)` herdando de `langchain_core.language_models.llms.LLM`
+    (LangChain 1.x — confirmar o caminho do import com
+    `python -c "from langchain_core.language_models.llms import LLM; print('ok')"`
+    antes de escrever o resto da classe)
   - `_llm_type = "medical-mlx"`
   - `_call(prompt, stop, run_manager)`: chama `mlx_lm.generate` com adapter carregado
   - `_identifying_params`: expõe `model_path` e `adapter_path`
@@ -323,11 +326,16 @@ tech-challenge-group-24/
       2. Recupera contexto do paciente via `retriever`
       3. Checa prescrição via guardrails
       4. Monta prompt com `build_prompt`
-      5. Chama LLM via LangChain chain
+      5. Invoca a chain LCEL (`chain.invoke({...})`)
       6. Valida resposta via guardrails
       7. Loga via audit_logger
       8. Retorna `{"response", "source", "guardrail_triggered", "patient_context_used"}`
-    - `create_chain(llm)`: retorna `LLMChain` com `ConversationBufferMemory`
+    - `create_chain(llm)`: monta a chain no estilo **LCEL** do LangChain 1.x —
+      `prompt | llm`, envolvida em `RunnableWithMessageHistory` para o histórico da conversa
+      (`InMemoryChatMessageHistory` por `session_id`)
+      - `LLMChain` e `ConversationBufferMemory` **não** existem mais no pacote principal do
+        LangChain 1.x: foram para o `langchain-classic`. Não usar — o projeto fica preso à
+        linha 0.3 e o pip rebaixa todo o ecossistema em volta
   - Executável interativo: `python -m src.assistant.chain`
 
 - [ ] `tests/test_chain.py`
