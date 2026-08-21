@@ -20,10 +20,25 @@ Assistente virtual médico treinado com dados hospitalares próprios, capaz de a
 
 ## Pré-requisitos
 
-- Python 3.11+
+- Python 3.11+ (o projeto é desenvolvido e validado em 3.13)
 - Apple Silicon (M1/M2/M3) para fine-tuning via MLX — em Linux/x86 o `mlx-lm` não é instalado (o restante do projeto funciona normalmente)
 - Conta no [HuggingFace](https://huggingface.co) com token de acesso
-- Acesso ao modelo `meta-llama/Llama-3.2-3B-Instruct` (solicitar em huggingface.co/meta-llama)
+- Acesso aprovado ao modelo `meta-llama/Llama-3.2-3B-Instruct` — **peça primeiro**, ver abaixo
+
+### Acesso ao modelo (faça isso antes de tudo)
+
+O `meta-llama/Llama-3.2-3B-Instruct` é *gated*: exige aceitar a licença da Meta e aguardar
+aprovação, que pode levar de minutos a dias. É a única dependência do projeto com espera
+humana, então dispare no início e siga com o resto do setup em paralelo.
+
+1. Logado no HuggingFace, abra
+   [huggingface.co/meta-llama/Llama-3.2-3B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct)
+   e preencha o formulário de acesso
+2. Crie um token em [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens),
+   tipo *Read*. Se optar por *fine-grained*, marque **"Read access to contents of all public
+   gated repos you can access"** — sem isso o token não abre o modelo mesmo com o acesso aprovado
+
+Nada disso bloqueia o pipeline de dados (PR 02): o PubMedQA é público.
 
 ## Instalação
 
@@ -32,23 +47,46 @@ Assistente virtual médico treinado com dados hospitalares próprios, capaz de a
 git clone https://github.com/oryange/tech-challenge-group-24.git
 cd tech-challenge-group-24
 
-# 2. Crie e ative o ambiente virtual
-python -m venv venv
+# 2. Crie e ative o ambiente virtual — fixe o interpretador em 3.13.
+#    Não use só "python3": em máquinas onde ele aponta para 3.14, parte das wheels
+#    (o mlx-lm entre elas) ainda não existe e a instalação falha.
+python3.13 -m venv venv
 source venv/bin/activate
+python -m pip install --upgrade pip
 
 # 3. Instale as dependências
 pip install -r requirements.txt
 
 # 4. Configure as variáveis de ambiente
 cp .env.example .env
-# Edite .env com seu token HuggingFace e caminhos desejados
+# Edite .env e cole o MESMO token em HUGGINGFACE_TOKEN e HF_TOKEN.
+# São dois nomes de propósito: HF_TOKEN é o que a biblioteca huggingface_hub lê.
+
+# 5. Autentique a CLI do HuggingFace
+#    O .env cobre só o código Python; comandos de CLI (mlx_lm, downloads) usam o token
+#    gravado em ~/.cache/huggingface/token por este login.
+hf auth login
+
+# 6. Registre o kernel do Jupyter, para os notebooks rodarem com o venv
+#    Sem isso os notebooks usam o Python do sistema e os imports falham.
+python -m ipykernel install --user --name tc-fase3 --display-name "TC Fase 3"
 ```
+
+O `.env` é ignorado pelo git (regra `*.env`) — nunca comite um token.
 
 ### Versões das dependências
 
-O `requirements.txt` declara piso e teto para cada pacote (ex.: `langchain>=0.3.0,<1.0.0`),
-então um major novo não entra sozinho no ambiente. Para reproduzir exatamente o mesmo
-conjunto de versões em outra máquina, gere um lock a partir do ambiente já validado:
+O `requirements.txt` declara piso e teto para cada pacote (ex.: `langchain>=1.0.0,<2.0.0`),
+então um major novo não entra sozinho no ambiente. Os tetos foram conferidos contra uma
+instalação limpa em venv com Python 3.13 — não os afrouxe sem reinstalar do zero.
+
+O projeto usa **LangChain 1.x**: o pipeline é LCEL (`prompt | llm`) com
+`RunnableWithMessageHistory`. As APIs `LLMChain` e `ConversationBufferMemory` são da linha
+0.x e saíram para o `langchain-classic`; o `scripts/check_env.py` falha de propósito se elas
+reaparecerem, porque isso indica que o ecossistema foi rebaixado.
+
+Para reproduzir exatamente o mesmo conjunto de versões em outra máquina, gere um lock a
+partir do ambiente já validado:
 
 ```bash
 pip freeze > requirements-lock.txt   # gerar (commitar quando a stack estiver estável)
