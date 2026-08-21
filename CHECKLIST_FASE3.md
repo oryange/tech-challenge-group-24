@@ -41,6 +41,8 @@ tech-challenge-group-24/
 │   ├── graph/                      # LangGraph flow
 │   ├── database/                   # SQLAlchemy models + seed
 │   └── audit/                      # Audit logger (evita sombrear o `logging` da stdlib)
+├── scripts/
+│   └── check_env.py                # Verificação de ambiente (exit 0/1, usável em CI)
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
@@ -78,6 +80,10 @@ tech-challenge-group-24/
       `data/processed/` e `data/synthetic/` ficam versionados de propósito, são entregáveis)
 - [x] Adicionar `.pre-commit-config.yaml` (hoje `repos: []` — sem hooks; existe para não
       bloquear commits em quem tem o pre-commit instalado globalmente)
+- [x] Criar `scripts/check_env.py` — verificação de ambiente com exit 0/1
+      (`python -m scripts.check_env`): venv ativo, versões das dependências, pacotes de
+      `src/`, APIs que cada PR usa, ausência das APIs legadas do LangChain 0.x, MLX na GPU
+      e variáveis do `.env`. Rodar isto antes de começar qualquer PR
 
 **Dependências de outras PRs:** nenhuma — deve ser a primeira
 

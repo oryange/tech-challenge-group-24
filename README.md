@@ -57,44 +57,31 @@ pip install -r requirements-lock.txt # reproduzir
 
 ## Verificação do setup
 
-Após a instalação, rode os comandos abaixo para confirmar que tudo está funcionando antes de avançar:
+Depois da instalação, rode a verificação de ambiente a partir da **raiz do repositório**,
+com o venv ativo:
 
 ```bash
-# 1. Verificar dependências instaladas
-python -c "
-import importlib.metadata
-import langchain, sqlalchemy, datasets
+# 1. Verificação completa do ambiente
+python -m scripts.check_env
 
-print('langchain:  ', langchain.__version__)
-print('langgraph:  ', importlib.metadata.version('langgraph'))
-print('sqlalchemy: ', sqlalchemy.__version__)
-print('datasets:   ', importlib.metadata.version('datasets'))
-
-# mlx-lm só é instalado em macOS/Apple Silicon (ver requirements.txt)
-try:
-    print('mlx-lm:     ', importlib.metadata.version('mlx-lm'))
-except importlib.metadata.PackageNotFoundError:
-    print('mlx-lm:      não instalado (esperado fora de macOS/Apple Silicon)')
-
-print()
-print('Setup OK — dependências instaladas com sucesso!')
-"
-
-# 2. Verificar que os pacotes src/ são reconhecidos pelo Python
-python -c "
-import src
-import src.data, src.fine_tuning, src.llm
-import src.assistant, src.graph, src.database, src.audit
-print('Todos os pacotes src/ reconhecidos com sucesso!')
-"
-
-# 3. Rodar o pytest. Neste estágio ainda não existem testes, então a saída esperada é
+# 2. Rodar o pytest. Neste estágio ainda não existem testes, então a saída esperada é
 #    'no tests ran' com exit code 5 (o código do pytest para "nenhum teste coletado").
 #    Não é falha de setup: significa que o pytest achou o pytest.ini e a pasta tests/.
 pytest tests/ -v; echo "exit code: $?"
 ```
 
-> **Nota:** Os três comandos acima devem passar já no PR 01 — eles só checam dependências,
+O `scripts/check_env.py` checa, em sete seções: se o venv está ativo; as dependências
+instaladas com suas versões (tratando o `mlx-lm` como aviso fora de Apple Silicon); os
+pacotes de `src/`; as APIs que cada PR vai usar (`LLM`, `ChatPromptTemplate`,
+`RunnableWithMessageHistory`, `StateGraph`, `mlx_lm.generate`); que as APIs legadas do
+LangChain 0.x (`LLMChain`, `ConversationBufferMemory`) **não** estão presentes; se o MLX
+executa na GPU; e as variáveis do `.env`.
+
+Ele sai com **exit 0** quando o ambiente está pronto e **exit 1** se algo essencial falta,
+então serve direto em CI. As variáveis do `.env` são apenas avisos — só importam a partir
+do PR 04.
+
+> **Nota:** Os dois comandos acima devem passar já no PR 01 — eles só checam dependências,
 > pacotes e a coleta do pytest. O que ainda **não** funciona são os comandos da seção
 > seguinte: os módulos dentro de `src/` são implementados incrementalmente por PR, então
 > até o PR 02 ser mergeado `python -m src.data.loader` falha com
@@ -174,6 +161,8 @@ tech-challenge-group-24/
 │   ├── graph/              # Fluxo LangGraph
 │   ├── database/           # SQLAlchemy models + seed
 │   └── audit/              # Audit logger (nome evita sombrear o `logging` da stdlib)
+├── scripts/
+│   └── check_env.py        # Verificação de ambiente (python -m scripts.check_env)
 ├── tests/
 ├── docs/
 │   ├── relatorio-tecnico.md
