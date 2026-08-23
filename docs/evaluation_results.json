@@ -1,0 +1,105 @@
+{
+  "generated_at": "2026-08-23T15:12:05+00:00",
+  "model": "meta-llama/Llama-3.2-3B-Instruct",
+  "config": {
+    "model": "meta-llama/Llama-3.2-3B-Instruct",
+    "lora_layers": 8,
+    "lora_rank": 8,
+    "lora_alpha": 16.0,
+    "lora_scale_mlx": 2.0,
+    "lora_dropout": 0.0,
+    "learning_rate": 0.0001,
+    "num_iters": 500,
+    "batch_size": 4,
+    "max_seq_length": 1024,
+    "val_batches": 25,
+    "seed": 42
+  },
+  "samples_evaluated": 50,
+  "max_tokens": 256,
+  "baseline": {
+    "metrics": {
+      "rouge_l": 0.17461217154011488,
+      "bleu_4": 3.423601051382676
+    },
+    "samples_evaluated": 50,
+    "adapter_path": null,
+    "examples": [
+      {
+        "prompt": "The use of audit to identify maternal mortality in different settings: is it just a difference between the rich and the poor?\n\nContexto:\nOBJECTIVE: To illustrate how maternal mortality audit identifies different causes of and contributing factors to maternal deaths in different settings in low- and ",
+        "reference": "Differences in maternal mortality are more than just differences between the rich and poor. Acknowledging the magnitude of maternal mortality and harnessing a strong political will to tackle the issues are important factors. However, there is no single, general solution to reduce maternal mortality,",
+        "prediction": "The article highlights the importance of maternal mortality audits in identifying the causes and contributing factors of maternal deaths in different settings, including low- and high-income countries. The study reveals that while the overall maternal mortality ratio (MMR) varies significantly acros"
+      },
+      {
+        "prompt": "Do socioeconomic differences in mortality persist after retirement?\n\nContexto:\nOBJECTIVE: To assess the risk of death associated with work based and non-work based measures of socioeconomic status before and after retirement age.\n\nDESIGN: Follow up study of mortality in relation to employment grade ",
+        "reference": "Socioeconomic differences in mortality persist beyond retirement age and in magnitude increase with age. Social differentials in mortality based on an occupational status measure seem to decrease to a greater degree after retirement than those based on a non-work measure. This suggests that alongsid",
+        "prediction": "Yes, socioeconomic differences in mortality persist after retirement. The study found that:\n\n1. Before retirement, employment grade was a strong predictor of mortality, with the lowest employment grade having 3.12 times the mortality of the highest grade.\n2. After retirement, the ability of employme"
+      },
+      {
+        "prompt": "Does rugby headgear prevent concussion?\n\nContexto:\nOBJECTIVES: To examine the attitudes of players and coaches to the use of protective headgear, particularly with respect to the prevention of concussion.\n\nMETHODS: A questionnaire designed to assess attitudes to headgear was administered to 63 playe",
+        "reference": "Although most players in the study believe that rugby headgear may prevent concussion, only a minority reported wearing it. Coaches tended to be less convinced than the players that rugby headgear can prevent concussion.",
+        "prediction": "No, the study found that rugby headgear does not prevent concussion. Despite the players' belief that headgear could prevent concussion, only a minority (27%) reported wearing headgear, and even fewer (24%) felt that its use should be made mandatory. The common reasons for not wearing headgear were "
+      }
+    ]
+  },
+  "fine_tuned": {
+    "metrics": {
+      "rouge_l": 0.2903511509029857,
+      "bleu_4": 16.076683979305486
+    },
+    "samples_evaluated": 50,
+    "adapter_path": "data/fine_tuned/adapters",
+    "examples": [
+      {
+        "prompt": "The use of audit to identify maternal mortality in different settings: is it just a difference between the rich and the poor?\n\nContexto:\nOBJECTIVE: To illustrate how maternal mortality audit identifies different causes of and contributing factors to maternal deaths in different settings in low- and ",
+        "reference": "Differences in maternal mortality are more than just differences between the rich and poor. Acknowledging the magnitude of maternal mortality and harnessing a strong political will to tackle the issues are important factors. However, there is no single, general solution to reduce maternal mortality,",
+        "prediction": "The use of maternal mortality audit to identify causes of maternal deaths is not limited to the poor. The results of this audit are not only dependent on the socio-economic status of the population but also on the local context."
+      },
+      {
+        "prompt": "Do socioeconomic differences in mortality persist after retirement?\n\nContexto:\nOBJECTIVE: To assess the risk of death associated with work based and non-work based measures of socioeconomic status before and after retirement age.\n\nDESIGN: Follow up study of mortality in relation to employment grade ",
+        "reference": "Socioeconomic differences in mortality persist beyond retirement age and in magnitude increase with age. Social differentials in mortality based on an occupational status measure seem to decrease to a greater degree after retirement than those based on a non-work measure. This suggests that alongsid",
+        "prediction": "The socioeconomic gradient in mortality persists after retirement. The results show that grade of employment was a strong predictor of mortality before retirement, and its association with mortality declined after retirement. However, the association between car ownership and mortality was less stro"
+      },
+      {
+        "prompt": "Does rugby headgear prevent concussion?\n\nContexto:\nOBJECTIVES: To examine the attitudes of players and coaches to the use of protective headgear, particularly with respect to the prevention of concussion.\n\nMETHODS: A questionnaire designed to assess attitudes to headgear was administered to 63 playe",
+        "reference": "Although most players in the study believe that rugby headgear may prevent concussion, only a minority reported wearing it. Coaches tended to be less convinced than the players that rugby headgear can prevent concussion.",
+        "prediction": "The use of headgear to prevent concussion is not a guarantee. The results of this study suggest that the players believe that the headgear can help prevent concussion, but the coaches are less convinced."
+      }
+    ]
+  },
+  "delta": {
+    "rouge_l": 0.11573897936287081,
+    "bleu_4": 12.65308292792281
+  },
+  "best_checkpoint": {
+    "metrics": {
+      "rouge_l": 0.274104225037179,
+      "bleu_4": 12.612330027142438
+    },
+    "samples_evaluated": 50,
+    "adapter_path": "data/fine_tuned/adapters_best",
+    "examples": [
+      {
+        "prompt": "The use of audit to identify maternal mortality in different settings: is it just a difference between the rich and the poor?\n\nContexto:\nOBJECTIVE: To illustrate how maternal mortality audit identifies different causes of and contributing factors to maternal deaths in different settings in low- and ",
+        "reference": "Differences in maternal mortality are more than just differences between the rich and poor. Acknowledging the magnitude of maternal mortality and harnessing a strong political will to tackle the issues are important factors. However, there is no single, general solution to reduce maternal mortality,",
+        "prediction": "The use of maternal mortality audit is a valuable tool for identifying the causes of maternal deaths and contributing factors in different settings. The findings of this study suggest that maternal mortality audit is not just a difference between the rich and the poor."
+      },
+      {
+        "prompt": "Do socioeconomic differences in mortality persist after retirement?\n\nContexto:\nOBJECTIVE: To assess the risk of death associated with work based and non-work based measures of socioeconomic status before and after retirement age.\n\nDESIGN: Follow up study of mortality in relation to employment grade ",
+        "reference": "Socioeconomic differences in mortality persist beyond retirement age and in magnitude increase with age. Social differentials in mortality based on an occupational status measure seem to decrease to a greater degree after retirement than those based on a non-work measure. This suggests that alongsid",
+        "prediction": "The results of the study suggest that socioeconomic differences in mortality persist after retirement."
+      },
+      {
+        "prompt": "Does rugby headgear prevent concussion?\n\nContexto:\nOBJECTIVES: To examine the attitudes of players and coaches to the use of protective headgear, particularly with respect to the prevention of concussion.\n\nMETHODS: A questionnaire designed to assess attitudes to headgear was administered to 63 playe",
+        "reference": "Although most players in the study believe that rugby headgear may prevent concussion, only a minority reported wearing it. Coaches tended to be less convinced than the players that rugby headgear can prevent concussion.",
+        "prediction": "The use of headgear in rugby is not a proven method to prevent concussion. The results of the study suggest that players and coaches are not convinced that headgear is effective in preventing concussion."
+      }
+    ],
+    "iteration": 200,
+    "validation_loss": 1.672
+  },
+  "delta_best_checkpoint": {
+    "rouge_l": 0.09949205349706414,
+    "bleu_4": 9.188728975759762
+  }
+}

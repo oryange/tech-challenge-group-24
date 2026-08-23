@@ -18,6 +18,15 @@ nltk>=3.8.0,<4.0.0
 rouge-score>=0.1.2,<1.0.0
 sacrebleu>=2.4.0,<3.0.0
 python-dotenv>=1.0.0,<2.0.0
+# O trainer escreve o YAML de configuração do LoRA (rank e scale não têm flag de CLI).
+# Declarado explicitamente: hoje o pyyaml só chega como dependência transitiva do mlx-lm,
+# que está restrito a Apple Silicon — em Linux/CI o import falharia.
+pyyaml>=6.0.0,<7.0.0
+
+# O trainer conta tokens com o chat_template do tokenizer antes de gerar train.jsonl, para
+# descartar exemplos cujo prompt não deixa espaço para a resposta (a origem da loss NaN).
+# Só o tokenizer é usado — nenhum peso é carregado, e o PyTorch não é necessário.
+transformers>=5.0.0,<6.0.0
 pytest>=8.0.0,<10.0.0
 pytest-mock>=3.14.0,<4.0.0
 # numpy fica aberto ao 2.x de propósito: numpy<2 não tem wheels para Python 3.13+
