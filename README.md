@@ -38,7 +38,7 @@ humana, então dispare no início e siga com o resto do setup em paralelo.
    tipo *Read*. Se optar por *fine-grained*, marque **"Read access to contents of all public
    gated repos you can access"** — sem isso o token não abre o modelo mesmo com o acesso aprovado
 
-Nada disso bloqueia o pipeline de dados (PR 02): o PubMedQA é público.
+Nada disso bloqueia o pipeline de dados: o PubMedQA é público.
 
 ## Instalação
 
@@ -102,36 +102,20 @@ com o venv ativo:
 # 1. Verificação completa do ambiente
 python -m scripts.check_env
 
-# 2. Rodar o pytest. Neste estágio ainda não existem testes, então a saída esperada é
-#    'no tests ran' com exit code 5 (o código do pytest para "nenhum teste coletado").
-#    Não é falha de setup: significa que o pytest achou o pytest.ini e a pasta tests/.
+# 2. Rodar a suíte de testes — a saída esperada é exit code 0, sem falhas.
 pytest tests/ -v; echo "exit code: $?"
 ```
 
 O `scripts/check_env.py` checa, em sete seções: se o venv está ativo; as dependências
 instaladas com suas versões (tratando o `mlx-lm` como aviso fora de Apple Silicon); os
-pacotes de `src/`; as APIs que cada PR vai usar (`LLM`, `ChatPromptTemplate`,
+pacotes de `src/`; as APIs que o projeto usa (`LLM`, `ChatPromptTemplate`,
 `RunnableWithMessageHistory`, `StateGraph`, `mlx_lm.generate`); que as APIs legadas do
 LangChain 0.x (`LLMChain`, `ConversationBufferMemory`) **não** estão presentes; se o MLX
 executa na GPU; e as variáveis do `.env`.
 
 Ele sai com **exit 0** quando o ambiente está pronto e **exit 1** se algo essencial falta,
-então serve direto em CI. As variáveis do `.env` são apenas avisos — só importam a partir
-do PR 04.
-
-> **Nota:** Os dois comandos acima devem passar já no PR 01 — eles só checam dependências,
-> pacotes e a coleta do pytest. O que ainda **não** funciona são os comandos da seção
-> seguinte: os módulos dentro de `src/` são implementados incrementalmente por PR, então
-> até o PR 02 ser mergeado `python -m src.data.loader` falha com
-> `No module named src.data.loader` (o módulo ainda não existe) e um
-> `from src.data import loader` falha com `cannot import name 'loader' from 'src.data'`.
-
-<!-- separador: mantém as duas notas como blocos distintos (markdownlint MD028) -->
-
-> **Nota para CI:** exit code 5 não é sucesso para a maioria dos runners. Enquanto a
-> ausência de testes for esperada, use `pytest tests/ -v || [ $? -eq 5 ]` para tolerar
-> só esse código. A partir do PR 02 (primeiros testes) o esperado passa a ser exit 0,
-> e essa tolerância deve ser removida — senão ela mascara uma suíte que parou de coletar.
+então serve direto em CI. As variáveis do `.env` são apenas avisos — só importam quando o
+fine-tuning e o assistente são executados.
 
 ## Como executar o pipeline completo
 
