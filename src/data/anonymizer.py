@@ -33,10 +33,16 @@ _MESES = (
     "novembro|dezembro"
 )
 _PALAVRA_NOME = r"[A-ZÀ-Ý][\wÀ-ÿ'’-]+"
-# Nome com até 3 palavras, sem consumir o espaço final: se consumisse, a substituição
+# Partículas em minúscula no meio do nome. Sem elas o match para no conectivo e o sobrenome
+# sobra no texto ("paciente Maria da Silva Santos" -> "paciente [PACIENTE] da Silva Santos"),
+# que é o formato de nome mais comum no Brasil.
+_PARTICULA = r"d[aeo]s?"
+# Nome com até 4 palavras, sem consumir o espaço final: se consumisse, a substituição
 # precisaria recolocá-lo e isso exigia uma limpeza de espaços que mutilava texto legítimo
 # (`P = .04` virava `P =.04` nos abstracts do PubMedQA).
-_NOME_COMPLETO = rf"{_PALAVRA_NOME}(?:\s+{_PALAVRA_NOME}){{0,2}}"
+_NOME_COMPLETO = (
+    rf"{_PALAVRA_NOME}(?:\s+(?:(?:{_PARTICULA})\s+)?{_PALAVRA_NOME}){{0,3}}"
+)
 
 # A ORDEM importa: e-mail antes de telefone e CPF (contém dígitos e pontos que as outras
 # regras casariam parcialmente), e datas antes de telefone (dd/mm/aaaa vs sequências de
@@ -73,12 +79,23 @@ _REGRAS: tuple[tuple[re.Pattern[str], str], ...] = (
         ),
         lambda m: f"{m.group('cue')}{m.group('sep')}{TOKEN_TELEFONE}",
     ),
-    # Profissional de saúde: "Dr. João Carlos Silva", "Dra. Maria" -> [MÉDICO]
-    (re.compile(rf"\b(?:Dr|Dra|Doutor|Doutora)\.?\s+{_NOME_COMPLETO}"), TOKEN_MEDICO),
-    # Nome de paciente, sempre ancorado num marcador que é preservado
+    # Profissional de saúde: "Dr. João Carlos Silva", "DRA. MARIA" -> [MÉDICO]
+    (re.compile(rf"\b(?:(?i:Dr|Dra|Doutor|Doutora))\.?\s+{_NOME_COMPLETO}"), TOKEN_MEDICO),
+    # Nome de paciente, sempre ancorado num marcador que é preservado. O (?i:...) fica
+    # restrito ao cue: aplicar re.IGNORECASE no padrão inteiro faria [A-ZÀ-Ý] casar
+    # minúscula e o nome passaria a engolir palavra comum ("paciente com asma").
+    # O separador aceita ":" ("Paciente: João Silva" é a forma padrão em laudo) mas NÃO
+    # aceita ponto: "paciente. Solicitar exame" casaria o início da frase seguinte.
     (
         re.compile(
-            rf"\b(?P<cue>paciente|Sr|Sra|Srta)(?P<sep>\.?\s+)(?P<nome>{_NOME_COMPLETO})"
+            rf"\b(?P<cue>(?i:paciente))(?P<sep>\s*:?\s+)(?P<nome>{_NOME_COMPLETO})"
+        ),
+        lambda m: f"{m.group('cue')}{m.group('sep')}{TOKEN_PACIENTE}",
+    ),
+    # Abreviações, onde o ponto pertence ao próprio marcador e não ao separador
+    (
+        re.compile(
+            rf"\b(?P<cue>(?i:Sr|Sra|Srta))(?P<sep>\.?\s*:?\s+)(?P<nome>{_NOME_COMPLETO})"
         ),
         lambda m: f"{m.group('cue')}{m.group('sep')}{TOKEN_PACIENTE}",
     ),

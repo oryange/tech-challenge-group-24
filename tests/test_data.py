@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from src.data.anonymizer import anonymize, anonymize_record
+from src.data.anonymizer import TOKEN_PACIENTE, anonymize, anonymize_record
 from src.data.synthetic_generator import (
     CONDICOES,
     TOTAL_PADRAO,
@@ -202,6 +202,57 @@ def test_anonymize_remove_cpf_telefone_email_prontuario():
     for vazado in ("Maria", "123.456.789-00", "98765-4321", "maria@hospital.com.br", "4455667"):
         assert vazado not in resultado, vazado
     assert resultado.endswith(".")  # regressão: o ID não pode engolir a pontuação final
+
+
+@pytest.mark.parametrize(
+    "texto, sobrenome",
+    [
+        # Partícula em minúscula quebrava o match no conectivo e o sobrenome sobrava no
+        # texto — o único vazamento real do conjunto, e no formato de nome mais comum aqui.
+        ("paciente Maria da Silva Santos", "Silva"),
+        ("Dr. Joao de Souza Lima", "Souza"),
+        ("Sra. Ana dos Santos compareceu", "Santos"),
+    ],
+)
+def test_anonymize_nome_com_particula_nao_deixa_sobrenome(texto, sobrenome):
+    assert sobrenome not in anonymize(texto)
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "paciente Joao Carlos Silva",  # forma já coberta, aqui como controle
+        "Paciente Joao Carlos Silva, 45 anos",  # cue capitalizado
+        "Paciente: Joao Carlos Silva",  # rótulo com dois-pontos: padrão em laudo
+        "PACIENTE: Joao Carlos Silva",
+    ],
+)
+def test_anonymize_cobre_variacoes_do_marcador_de_paciente(texto):
+    resultado = anonymize(texto)
+
+    assert TOKEN_PACIENTE in resultado
+    assert "Joao" not in resultado and "Silva" not in resultado
+
+
+def test_anonymize_cue_de_medico_insensivel_a_caixa():
+    assert anonymize("DR. JOAO SILVA assinou o laudo") == "[MÉDICO] assinou o laudo"
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        # O separador não pode aceitar ponto final: casava o início da frase seguinte,
+        # engolia a primeira palavra e inflava a contagem de [PACIENTE].
+        "Avaliar o paciente. Solicitar exame.",
+        "Encaminhar ao paciente. Registrar no sistema.",
+        # O (?i:) é restrito ao cue de propósito: IGNORECASE no padrão inteiro faria
+        # [A-ZÀ-Ý] casar minúscula e o nome engoliria palavra comum.
+        "paciente com asma persistente",
+        "O paciente relatou dor",
+    ],
+)
+def test_anonymize_marcador_de_paciente_sem_nome_nao_altera(texto):
+    assert anonymize(texto) == texto
 
 
 @pytest.mark.parametrize(
