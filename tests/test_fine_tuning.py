@@ -291,6 +291,53 @@ def test_train_grava_historico_parcial_quando_o_treino_falha(tmp_path, mocker):
     assert gravado["history"]["train"] == [{"iter": 10, "loss": 2.455}]
 
 
+def test_train_grava_divergencia_em_json_estrito(tmp_path, mocker):
+    # Trava o par inteiro: rodada divergente entra, JSON que qualquer parser lê sai, e o
+    # best_checkpoint não elege campeão. O NaN cru é traiçoeiro porque o Python relê o
+    # arquivo sem reclamar — só quem lê de fora (JSON.parse recusa, jq converte em silêncio)
+    # descobre que o artefato está quebrado.
+    entrada = tmp_path / "dataset.jsonl"
+    save_jsonl([_registro(instruction=f"p{i}") for i in range(20)], entrada)
+    historico_path = tmp_path / "docs" / "training_history.json"
+
+    mocker.patch(
+        "src.fine_tuning.trainer._run_mlx",
+        return_value=(
+            [
+                "Iter 100: Train loss nan, Learning Rate 1.000e-04",
+                "Iter 100: Val loss nan, Val took 1s",
+                "Iter 200: Val loss -inf, Val took 1s",
+            ],
+            0,
+        ),
+    )
+    mocker.patch("src.fine_tuning.trainer.build_token_counter", return_value=None)
+
+    train(
+        LoRAConfig(data_dir=tmp_path / "mlx"),
+        dataset_path=entrada,
+        historico_path=historico_path,
+        log_path=tmp_path / "logs" / "fine_tuning.log",
+    )
+
+    texto = historico_path.read_text(encoding="utf-8")
+    assert "NaN" not in texto and "Infinity" not in texto
+
+    # `parse_constant` é chamado exatamente nos literais que a RFC 8259 não admite; levantar
+    # aqui reproduz o rigor de um parser de fora do Python.
+    def estrito(literal: str) -> object:
+        raise AssertionError(f"literal não-JSON no artefato: {literal}")
+
+    gravado = json.loads(texto, parse_constant=estrito)
+    assert gravado["history"]["validation"] == [
+        {"iter": 100, "loss": None},
+        {"iter": 200, "loss": None},
+    ]
+
+    diretorio = _checkpoints(tmp_path, [100, 200])
+    assert best_checkpoint(gravado["history"]["validation"], diretorio) is None
+
+
 def test_parse_training_history_separa_treino_e_validacao():
     linhas = [
         "Iter 10: Train loss 2.345, Learning Rate 1.000e-04, It/sec 1.2",
@@ -311,14 +358,24 @@ def test_parse_training_history_registra_divergencia():
     # Regressão: a primeira versão da regex aceitava só dígitos, então uma rodada que
     # produziu "Train loss nan" do início ao fim virava histórico vazio — o notebook
     # desenhava um gráfico em branco em vez de mostrar que o treino havia quebrado.
-    import math
-
+    #
+    # O ponto entra, mas com `None` no lugar de `float('nan')`: o valor precisa sobreviver à
+    # serialização, e `NaN` não é JSON válido.
     historico = parse_training_history(
-        ["Iter 2: Train loss nan, Learning Rate 1.000e-04", "Iter 2: Val loss nan, Val took 1s"]
+        [
+            "Iter 2: Train loss nan, Learning Rate 1.000e-04",
+            "Iter 2: Val loss nan, Val took 1s",
+            "Iter 3: Train loss inf, Learning Rate 1.000e-04",
+            "Iter 4: Train loss -inf, Learning Rate 1.000e-04",
+        ]
     )
 
-    assert math.isnan(historico["train"][0]["loss"])
-    assert math.isnan(historico["validation"][0]["loss"])
+    assert historico["train"] == [
+        {"iter": 2, "loss": None},
+        {"iter": 3, "loss": None},
+        {"iter": 4, "loss": None},
+    ]
+    assert historico["validation"] == [{"iter": 2, "loss": None}]
 
 
 def test_parse_training_history_aceita_notacao_cientifica():
@@ -414,6 +471,36 @@ def test_best_checkpoint_descarta_nan(tmp_path):
     iteracao, _ = best_checkpoint(validacao, diretorio)
 
     assert iteracao == 200
+
+
+def test_best_checkpoint_descarta_none(tmp_path):
+    # É assim que a divergência chega hoje: o parse_training_history grava `None`, e
+    # `math.isnan(None)` levantaria TypeError.
+    diretorio = _checkpoints(tmp_path, [100, 200])
+    validacao = [{"iter": 100, "loss": None}, {"iter": 200, "loss": 1.70}]
+
+    iteracao, _ = best_checkpoint(validacao, diretorio)
+
+    assert iteracao == 200
+
+
+def test_best_checkpoint_descarta_infinito(tmp_path):
+    # `-inf` passava pelo filtro antigo (`math.isnan` só pega NaN) e, por ser menor que
+    # qualquer real, sempre vencia o min() — apontando para o checkpoint de uma rodada que
+    # explodiu, e de forma determinística, o que dá a impressão de escolha deliberada.
+    diretorio = _checkpoints(tmp_path, [100, 200])
+    validacao = [{"iter": 100, "loss": float("-inf")}, {"iter": 200, "loss": 1.70}]
+
+    iteracao, _ = best_checkpoint(validacao, diretorio)
+
+    assert iteracao == 200
+
+
+def test_best_checkpoint_rodada_toda_divergente_devolve_none(tmp_path):
+    diretorio = _checkpoints(tmp_path, [100, 200])
+    validacao = [{"iter": 100, "loss": None}, {"iter": 200, "loss": None}]
+
+    assert best_checkpoint(validacao, diretorio) is None
 
 
 def test_best_checkpoint_sem_candidato_devolve_none(tmp_path):

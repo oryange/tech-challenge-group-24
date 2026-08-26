@@ -22,6 +22,7 @@ sugeriria:
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -170,14 +171,31 @@ def _write_yaml_config(config: LoRAConfig, destino: Path) -> Path:
     return destino
 
 
-def parse_training_history(linhas: list[str]) -> dict[str, list[dict[str, float]]]:
+def _loss(bruto: str) -> float | None:
+    """Converte o valor de loss da saída do MLX-LM, com `None` para `nan`/`inf`.
+
+    O ponto tem de continuar existindo — é assim que a divergência aparece no histórico e
+    no gráfico. Mas guardá-lo como `float('nan')` sabota o artefato: o `json.dumps` escreve
+    o literal `NaN`, que não é JSON válido (a RFC 8259 só admite números). O Python relê sem
+    reclamar, então dentro do projeto passa liso; fora dele, o `JSON.parse` recusa o arquivo
+    e o `jq` faz pior — aceita e converte em silêncio, `NaN` para `null` e `Infinity` para
+    `1.7976931348623157e+308`. O registro de que o treino divergiu viraria um número grande
+    e finito, que é exatamente a leitura errada.
+
+    `None` vira `null`, que todo parser lê e ninguém confunde com uma medição real.
+    """
+    valor = float(bruto)
+    return valor if math.isfinite(valor) else None
+
+
+def parse_training_history(linhas: list[str]) -> dict[str, list[dict[str, float | None]]]:
     """Extrai as curvas de loss da saída do MLX-LM."""
-    historico: dict[str, list[dict[str, float]]] = {"train": [], "validation": []}
+    historico: dict[str, list[dict[str, float | None]]] = {"train": [], "validation": []}
     for linha in linhas:
         if (m := _LINHA_TREINO.search(linha)) is not None:
-            historico["train"].append({"iter": int(m["iter"]), "loss": float(m["loss"])})
+            historico["train"].append({"iter": int(m["iter"]), "loss": _loss(m["loss"])})
         elif (m := _LINHA_VALIDACAO.search(linha)) is not None:
-            historico["validation"].append({"iter": int(m["iter"]), "loss": float(m["loss"])})
+            historico["validation"].append({"iter": int(m["iter"]), "loss": _loss(m["loss"])})
     return historico
 
 
@@ -275,8 +293,14 @@ def train(
     # até ali é o único registro do que aconteceu, e é o que permite diagnosticar sem
     # repetir a hora de GPU.
     os.makedirs(historico_path.parent, exist_ok=True)
+    # `allow_nan=False`: o padrão do `json` é escrever `NaN`/`Infinity` crus, que não são
+    # JSON válido. O `_loss` já converte os não-finitos em `None`, então aqui isso nunca
+    # deveria disparar — é justamente por isso que vale a pena. Se um não-finito voltar a
+    # entrar por outro caminho, o erro aparece na gravação, e não meses depois em quem
+    # tentar ler o arquivo fora do Python.
     historico_path.write_text(
-        json.dumps(resultado, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps(resultado, ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
     )
 
     if codigo != 0:
@@ -285,6 +309,16 @@ def train(
             f"Saída completa em {log_path}; histórico parcial em {historico_path}."
         )
     return resultado
+
+
+def _fmt(ponto: dict[str, float | None]) -> str:
+    """Formata um ponto da curva; `divergiu` quando a loss não é finita.
+
+    Sem isto, `f"{None:.3f}"` levanta `TypeError` e o resumo final quebra justamente na
+    rodada em que ele mais importa — a que divergiu.
+    """
+    loss = ponto["loss"]
+    return "divergiu" if loss is None else f"{loss:.3f}"
 
 
 def main() -> dict[str, object]:
@@ -297,9 +331,9 @@ def main() -> dict[str, object]:
     print(f"\nAdapters: {resultado['adapter_path']}")
     print(f"Histórico: {HISTORICO_PADRAO.relative_to(RAIZ)}")
     if treino:
-        print(f"Loss de treino:     {treino[0]['loss']:.3f} -> {treino[-1]['loss']:.3f}")
+        print(f"Loss de treino:     {_fmt(treino[0])} -> {_fmt(treino[-1])}")
     if validacao:
-        print(f"Loss de validação:  {validacao[0]['loss']:.3f} -> {validacao[-1]['loss']:.3f}")
+        print(f"Loss de validação:  {_fmt(validacao[0])} -> {_fmt(validacao[-1])}")
     return resultado
 
 

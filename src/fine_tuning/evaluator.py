@@ -65,7 +65,7 @@ def available_checkpoints(adapter_dir: Path) -> dict[int, Path]:
 
 
 def best_checkpoint(
-    historico_validacao: list[dict[str, float]], adapter_dir: Path
+    historico_validacao: list[dict[str, float | None]], adapter_dir: Path
 ) -> tuple[int, Path] | None:
     """Escolhe o checkpoint com menor loss de validação entre os que existem em disco.
 
@@ -74,8 +74,13 @@ def best_checkpoint(
     coincidem — validação em 50, 100, 150..., checkpoint em 100, 200, 300... — então
     escolher pelo menor valor da curva inteira apontaria para uma iteração sem arquivo.
 
-    Descarta `nan`: uma rodada divergente não tem "melhor" checkpoint, e `min()` sobre NaN
-    devolve resultado arbitrário dependendo da ordem da lista.
+    Descarta loss não finita: uma rodada divergente não tem "melhor" checkpoint. O
+    `parse_training_history` grava esses pontos como `None`, mas o histórico pode vir de um
+    artefato antigo com `nan`/`inf` literais, então os três casos são filtrados aqui.
+
+    Note que `nan` e `inf` estragam a escolha de formas diferentes: `min()` sobre NaN devolve
+    resultado arbitrário conforme a ordem da lista, enquanto `-inf` é determinístico e sempre
+    ganha — apontando com confiança para o checkpoint de uma rodada que explodiu.
     """
     disponiveis = available_checkpoints(adapter_dir)
     if not disponiveis:
@@ -84,7 +89,9 @@ def best_checkpoint(
     candidatos = [
         (ponto["loss"], ponto["iter"])
         for ponto in historico_validacao
-        if ponto["iter"] in disponiveis and not math.isnan(ponto["loss"])
+        if ponto["iter"] in disponiveis
+        and ponto["loss"] is not None
+        and math.isfinite(ponto["loss"])
     ]
     if not candidatos:
         return None
