@@ -88,7 +88,12 @@ class LoRAConfig:
     passar pelo trainer, o registro deixaria de descrever o treino que de fato aconteceu.
     """
 
-    model: str = MODELO_BASE_PADRAO
+    # Lido de `BASE_MODEL` no `.env`, como o `ADAPTER_PATH` logo abaixo. A variável já existia
+    # no `.env.example` e já era validada pelo `check_env`, mas nada a consumia: trocá-la não
+    # mudava treino nem avaliação, enquanto o check dizia que estava tudo certo. Uma variável
+    # que o setup confere e o código ignora custa a quem for depurar exatamente o tempo que o
+    # check deveria poupar.
+    model: str = field(default_factory=lambda: os.getenv("BASE_MODEL") or MODELO_BASE_PADRAO)
 
     # Commit do modelo no Hub. `None` significa "o que `main` apontar" — que é o que o resto
     # do projeto evita em toda parte via seed, mas aqui nenhuma seed alcança: uma retag

@@ -103,7 +103,7 @@ def build_token_counter(model: str, revision: str | None = None):
 
 def _prepare_mlx_data(
     dataset_path: Path = DATASET_PADRAO,
-    output_dir: Path = None,  # type: ignore[assignment]
+    output_dir: Path | None = None,
     fracao_treino: float = FRACAO_TREINO,
     max_seq_length: int | None = None,
     contar_tokens=None,

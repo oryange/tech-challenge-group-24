@@ -13,7 +13,7 @@ import pytest
 import yaml
 
 from src.data.loader import save_jsonl
-from src.fine_tuning.config import LoRAConfig
+from src.fine_tuning.config import MODELO_BASE_PADRAO, LoRAConfig
 from src.fine_tuning.evaluator import (
     available_checkpoints,
     best_checkpoint,
@@ -101,6 +101,26 @@ def test_adapter_path_do_ambiente_e_ancorado_na_raiz(monkeypatch):
 
     assert caminho.is_absolute()
     assert caminho.parts[-3:] == ("data", "fine_tuned", "adapters")
+
+
+def test_base_model_do_ambiente_chega_no_treino(monkeypatch):
+    # A variável era validada pelo check_env sem ninguém consumi-la: trocá-la no .env não
+    # mudava treino nem avaliação. O teste trava as duas pontas — a config e o argumento que
+    # de fato vai para o mlx_lm.
+    monkeypatch.setenv("BASE_MODEL", "outra-org/OutroModelo-1B")
+
+    config = LoRAConfig()
+
+    assert config.model == "outra-org/OutroModelo-1B"
+    assert config.to_dict()["model"] == "outra-org/OutroModelo-1B"
+    args = config.to_mlx_args()
+    assert args[args.index("--model") + 1] == "outra-org/OutroModelo-1B"
+
+
+def test_base_model_ausente_cai_no_padrao(monkeypatch):
+    monkeypatch.delenv("BASE_MODEL", raising=False)
+
+    assert LoRAConfig().model == MODELO_BASE_PADRAO
 
 
 def test_model_revision_do_ambiente_entra_no_registro(monkeypatch):
