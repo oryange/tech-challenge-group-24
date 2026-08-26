@@ -67,16 +67,32 @@ def _revisao_em_cache(model: str) -> str | None:
 
 
 def _do_ambiente(variavel: str, padrao: Path) -> Path:
-    """Lê um caminho do `.env`, resolvendo relativo à raiz do repositório.
+    """Lê um caminho do `.env`, ancorando o relativo na raiz do repositório.
 
     `ADAPTER_PATH=data/fine_tuned/adapters` é relativo no `.env`. Sem ancorar na raiz, o
     destino dos adapters mudaria conforme o diretório de onde o comando foi disparado.
+
+    Duas normalizações, cada uma consertando um problema diferente:
+
+    * `expanduser()`, senão `ADAPTER_PATH=~/adapters` — coisa natural de escrever — não dá
+      erro nenhum: cria um diretório chamado literalmente `~` dentro do repositório e grava
+      os adapters lá. Falha silenciosa, do tipo que só aparece quando falta espaço em disco.
+    * `resolve()`, pela integridade do registro. O `relativo_a_raiz` compara caminhos de
+      forma lexical, então sem resolver `RAIZ/../../../../tmp/pwn` ele grava
+      `../../../../tmp/pwn` no `docs/`, um caminho que *parece* relativo à raiz e não é.
+      Com `resolve()`, o registro passa a mostrar o caminho absoluto de verdade.
+
+    O que **não** se faz aqui é exigir que o caminho fique contido na raiz. Mandar os
+    adapters para um disco externo é justamente o motivo de a variável existir, e quem a
+    define é quem roda o comando — não há fronteira de privilégio a defender.
     """
     valor = os.getenv(variavel)
     if not valor:
         return padrao
-    caminho = Path(valor)
-    return caminho if caminho.is_absolute() else RAIZ / caminho
+    caminho = Path(valor).expanduser()
+    if not caminho.is_absolute():
+        caminho = RAIZ / caminho
+    return caminho.resolve()
 
 
 @dataclass(frozen=True)

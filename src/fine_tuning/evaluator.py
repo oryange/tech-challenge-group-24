@@ -118,11 +118,24 @@ def materialize_checkpoint(checkpoint: Path, adapter_dir: Path, destino: Path) -
     O `load` espera um diretório com `adapters.safetensors` e `adapter_config.json`; o
     checkpoint intermediário tem outro nome e fica junto dos demais. Copiar (em vez de
     renomear) preserva os checkpoints originais para uma segunda comparação.
+
+    As duas origens são conferidas antes de qualquer escrita. Copiando direto, um
+    `adapter_config.json` ausente só estoura no segundo `copyfile`, depois de o primeiro já
+    ter gravado — e o que fica em disco é um diretório com metade do que o `load` espera,
+    com a cara de um destino pronto. Falhar antes de escrever deixa o disco como estava.
     """
+    checkpoint = Path(checkpoint)
+    configuracao = Path(adapter_dir) / "adapter_config.json"
+    for origem in (checkpoint, configuracao):
+        if not origem.is_file():
+            raise FileNotFoundError(
+                f"{origem} não existe — não dá para montar um diretório carregável sem ele."
+            )
+
     destino = Path(destino)
     os.makedirs(destino, exist_ok=True)
     shutil.copyfile(checkpoint, destino / "adapters.safetensors")
-    shutil.copyfile(Path(adapter_dir) / "adapter_config.json", destino / "adapter_config.json")
+    shutil.copyfile(configuracao, destino / "adapter_config.json")
     return destino
 
 

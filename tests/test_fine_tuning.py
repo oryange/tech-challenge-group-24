@@ -8,6 +8,7 @@ saída e cálculo das métricas.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 import yaml
@@ -100,6 +101,30 @@ def test_adapter_path_do_ambiente_e_ancorado_na_raiz(monkeypatch):
     caminho = LoRAConfig().adapter_path
 
     assert caminho.is_absolute()
+    assert caminho.parts[-3:] == ("data", "fine_tuned", "adapters")
+
+
+def test_adapter_path_expande_o_til(monkeypatch):
+    # `ADAPTER_PATH=~/adapters` é natural de escrever e falhava em silêncio: sem expanduser
+    # o `~` vira nome de diretório literal dentro do repositório, e os adapters vão para o
+    # lugar errado sem erro nenhum.
+    monkeypatch.setenv("ADAPTER_PATH", "~/adapters_de_teste")
+
+    caminho = LoRAConfig().adapter_path
+
+    assert "~" not in caminho.parts
+    assert caminho == (Path.home() / "adapters_de_teste").resolve()
+
+
+def test_adapter_path_e_normalizado_para_o_registro(monkeypatch):
+    # Sem resolve(), o `..` sobrevive no caminho e o relativo_a_raiz — que compara de forma
+    # lexical — grava algo como `../../tmp/x` no docs/, um caminho que parece interno à raiz
+    # sem ser. O registro tem de dizer onde os adapters realmente ficaram.
+    monkeypatch.setenv("ADAPTER_PATH", "data/../data/fine_tuned/adapters")
+
+    caminho = LoRAConfig().adapter_path
+
+    assert ".." not in caminho.parts
     assert caminho.parts[-3:] == ("data", "fine_tuned", "adapters")
 
 
@@ -596,6 +621,30 @@ def test_materialize_checkpoint_preserva_os_originais(tmp_path):
 
     assert (diretorio / "0000200_adapters.safetensors").is_file()
     assert (diretorio / "adapters.safetensors").read_bytes() == b"final"
+
+
+def test_materialize_checkpoint_nao_deixa_destino_pela_metade(tmp_path):
+    # Copiando direto, um adapter_config.json ausente só estoura no segundo copyfile, com o
+    # primeiro já gravado — sobra um diretório com metade do que o load espera, mas com a
+    # cara de um destino pronto. A falha tem de vir antes de qualquer escrita.
+    diretorio = _checkpoints(tmp_path, [200])
+    (diretorio / "adapter_config.json").unlink()
+    destino = tmp_path / "best"
+
+    with pytest.raises(FileNotFoundError, match="adapter_config.json"):
+        materialize_checkpoint(diretorio / "0000200_adapters.safetensors", diretorio, destino)
+
+    assert not destino.exists()
+
+
+def test_materialize_checkpoint_recusa_checkpoint_inexistente(tmp_path):
+    diretorio = _checkpoints(tmp_path, [200])
+    destino = tmp_path / "best"
+
+    with pytest.raises(FileNotFoundError):
+        materialize_checkpoint(diretorio / "0000999_adapters.safetensors", diretorio, destino)
+
+    assert not destino.exists()
 
 
 def test_load_test_samples_limita_e_preserva_ordem(tmp_path):
