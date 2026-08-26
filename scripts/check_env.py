@@ -167,12 +167,19 @@ def main() -> int:
         load_dotenv()
     except Exception:  # noqa: BLE001
         pass
-    token = os.getenv("HUGGINGFACE_TOKEN", "")
-    if token.startswith("hf_"):
-        print(f"{OK}| {'HUGGINGFACE_TOKEN':34} | definido")
+    # Os dois nomes são aceitos de propósito: o `huggingface_hub` lê HF_TOKEN, mas o
+    # projeto documentou HUGGINGFACE_TOKEN. Validar só um deles produzia dois estados
+    # confusos — check dizendo ok com o download falhando, ou o contrário.
+    nome_token = next(
+        (n for n in ("HF_TOKEN", "HUGGINGFACE_TOKEN") if os.getenv(n, "").startswith("hf_")),
+        "",
+    )
+    rotulo = "HF_TOKEN / HUGGINGFACE_TOKEN"
+    if nome_token:
+        print(f"{OK}| {rotulo:34} | definido em {nome_token}")
     else:
         avisos += 1
-        print(f"{AVISO}| {'HUGGINGFACE_TOKEN':34} | ausente — necessário no fine-tuning")
+        print(f"{AVISO}| {rotulo:34} | ausente — necessário no fine-tuning")
     for var in ("BASE_MODEL", "DB_PATH", "AUDIT_LOG_PATH", "ADAPTER_PATH"):
         valor = os.getenv(var)
         if valor:
