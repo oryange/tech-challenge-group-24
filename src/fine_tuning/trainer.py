@@ -26,6 +26,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -260,6 +261,10 @@ def train(
     historico = parse_training_history(linhas)
 
     resultado = {
+        # Marca o fim da rodada, no mesmo formato que o `evaluator` usa em
+        # `evaluation_results.json`. Os dois artefatos são lidos juntos pelo notebook, e sem
+        # data de um dos lados não há como saber se a avaliação corresponde a este treino.
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "config": config.to_dict(),
         "dataset": estatisticas,
         "history": historico,
