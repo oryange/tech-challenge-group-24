@@ -34,8 +34,13 @@ logs/*
 
 # data/processed/ e data/synthetic/ NÃO são ignorados de propósito: o dataset curado e
 # os registros sintéticos são entregáveis obrigatórios da Fase 3 ("dataset anonimizado ou
-# exemplo de dados sintéticos"), então precisam estar versionados. Todo o conteúdo é
-# sintético ou anonimizado — nunca commitar dado real de paciente aqui.
+# exemplo de dados sintéticos"), então precisam estar versionados.
+#
+# ATENÇÃO à garantia real, que hoje é mais fraca do que parece: só o `dataset.jsonl` passa
+# pelo anonimizador (é o curator que chama `anonymize_record`). O `pubmedqa.jsonl` é cópia
+# literal do corpus baixado — inofensivo por ser público, mas o loader não anonimiza nada,
+# então apontá-lo para um corpus interno versionaria o dado cru. Nunca commitar dado real
+# de paciente aqui.
 #
 # Exceção dentro dele: data/processed/mlx/ é intermediário do treino (split e YAML de
 # configuração), regenerado a partir do dataset.jsonl a cada execução do trainer. Versionar
