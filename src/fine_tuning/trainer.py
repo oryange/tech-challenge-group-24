@@ -73,16 +73,19 @@ def to_mlx_record(registro: dict[str, str]) -> dict[str, str]:
     return {"prompt": prompt, "completion": (registro.get("output") or "").strip()}
 
 
-def build_token_counter(model: str):
+def build_token_counter(model: str, revision: str | None = None):
     """Devolve `(prompt, completion) -> (tokens_prompt, tokens_total)` para o modelo dado.
 
     Usa o `chat_template` do próprio tokenizer, na mesma forma que o
     `mlx_lm.tuner.datasets.CompletionsDataset` usa no treino — é a única forma de a contagem
     aqui corresponder à que o treino vai fazer. Carrega apenas o tokenizer, não os pesos.
+
+    `revision` fixa o commit do modelo no Hub. Sem ela, uma retag upstream pode mudar a
+    contagem de tokens e, com ela, quais exemplos o filtro de `max_seq_length` descarta.
     """
     from transformers import AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(model)
+    tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
 
     def contar(prompt: str, completion: str) -> tuple[int, int]:
         mensagens = [
@@ -259,7 +262,7 @@ def train(
         dataset_path,
         config.data_dir,
         max_seq_length=config.max_seq_length,
-        contar_tokens=build_token_counter(config.model),
+        contar_tokens=build_token_counter(config.model, config.model_revision),
     )
     print(
         f"Dados MLX em {config.data_dir}: {estatisticas['train']} de treino, "

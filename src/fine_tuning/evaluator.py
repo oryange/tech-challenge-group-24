@@ -189,8 +189,14 @@ def generate_responses(
     adapter_path: str | os.PathLike[str] | None = None,
     max_tokens: int = MAX_TOKENS_PADRAO,
     verbose: bool = True,
+    revision: str | None = None,
 ) -> list[str]:
-    """Gera uma resposta por amostra. `adapter_path=None` avalia o modelo base."""
+    """Gera uma resposta por amostra. `adapter_path=None` avalia o modelo base.
+
+    `revision` fixa o commit do modelo no Hub. Importa mais aqui do que na contagem de
+    tokens: o baseline e o fine-tuned têm de sair do **mesmo** modelo base, ou o delta entre
+    eles mede a diferença entre duas versões de pesos em vez do efeito do fine-tuning.
+    """
     from mlx_lm import generate, load
 
     if adapter_path is not None and not Path(adapter_path).is_dir():
@@ -199,7 +205,9 @@ def generate_responses(
         )
 
     model, tokenizer = load(
-        model_path, adapter_path=str(adapter_path) if adapter_path else None
+        model_path,
+        adapter_path=str(adapter_path) if adapter_path else None,
+        revision=revision,
     )
 
     respostas = []
@@ -220,13 +228,16 @@ def evaluate(
     adapter_path: str | os.PathLike[str] | None,
     test_samples: list[dict[str, str]],
     max_tokens: int = MAX_TOKENS_PADRAO,
+    revision: str | None = None,
 ) -> dict[str, Any]:
     """Avalia um modelo sobre as amostras e devolve métricas mais alguns exemplos.
 
     Os exemplos vão no retorno de propósito: o relatório técnico exige análise dos
     resultados, e ROUGE/BLEU sozinhos não mostram *como* a resposta mudou.
     """
-    predicoes = generate_responses(test_samples, model_path, adapter_path, max_tokens)
+    predicoes = generate_responses(
+        test_samples, model_path, adapter_path, max_tokens, revision=revision
+    )
     referencias = [a["completion"] for a in test_samples]
     metricas = compute_metrics(predicoes, referencias)
 
@@ -274,9 +285,11 @@ def compare(
 
     print(f"Avaliando {len(amostras)} amostras de validação (nunca vistas no treino).")
     print("Baseline (modelo base, sem adapters)...")
-    baseline = evaluate(config.model, None, amostras, max_tokens)
+    baseline = evaluate(config.model, None, amostras, max_tokens, config.model_revision)
     print("Fine-tuned (último checkpoint)...")
-    finetuned = evaluate(config.model, config.adapter_path, amostras, max_tokens)
+    finetuned = evaluate(
+        config.model, config.adapter_path, amostras, max_tokens, config.model_revision
+    )
 
     resultados = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -303,7 +316,9 @@ def compare(
                 arquivo, config.adapter_path, config.adapter_path.parent / "adapters_best"
             )
             print(f"Melhor checkpoint (iteração {iteracao})...")
-            melhor = evaluate(config.model, destino, amostras, max_tokens)
+            melhor = evaluate(
+                config.model, destino, amostras, max_tokens, config.model_revision
+            )
             melhor["iteration"] = iteracao
             melhor["validation_loss"] = next(
                 p["loss"] for p in historico["history"]["validation"] if p["iter"] == iteracao

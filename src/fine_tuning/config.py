@@ -41,6 +41,31 @@ def relativo_a_raiz(caminho: Path | str) -> str:
         return str(caminho)
 
 
+def _revisao_em_cache(model: str) -> str | None:
+    """SHA do snapshot que o cache local do HuggingFace tem para `main`, se houver.
+
+    Serve ao registro, não ao download: quando ninguém fixou `MODEL_REVISION`, o artefato
+    ficaria sem dizer *quais* pesos produziram aquelas métricas. Ler o `refs/main` do cache
+    recupera o SHA que de fato foi usado na rodada.
+
+    Note a diferença entre as duas coisas, que o `to_dict` registra separadamente: um SHA
+    fixado é uma **garantia** (a próxima rodada baixa o mesmo); um SHA lido do cache é uma
+    **observação** (foi o que estava ali naquele dia, e uma retag upstream muda o que a
+    próxima rodada vai pegar). Confundir os dois daria uma falsa sensação de reprodutibilidade.
+    """
+    try:
+        from huggingface_hub import constants
+    except ImportError:
+        return None
+    referencia = (
+        Path(constants.HF_HUB_CACHE) / f"models--{model.replace('/', '--')}" / "refs" / "main"
+    )
+    try:
+        return referencia.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
 def _do_ambiente(variavel: str, padrao: Path) -> Path:
     """Lê um caminho do `.env`, resolvendo relativo à raiz do repositório.
 
@@ -64,6 +89,17 @@ class LoRAConfig:
     """
 
     model: str = MODELO_BASE_PADRAO
+
+    # Commit do modelo no Hub. `None` significa "o que `main` apontar" — que é o que o resto
+    # do projeto evita em toda parte via seed, mas aqui nenhuma seed alcança: uma retag
+    # upstream troca os pesos sem mudar uma linha do repositório. Fixar via `MODEL_REVISION`
+    # no `.env` fecha essa ponta para o tokenizer e para a avaliação.
+    #
+    # O treino é o caso que **não** dá para fixar por aqui: o `mlx_lm lora` não expõe flag de
+    # revision na linha de comando (só `--model`), então prendê-lo exigiria baixar um snapshot
+    # fixado e passar o diretório local. Enquanto isso não existe, o `to_dict` ao menos
+    # registra qual revisão a rodada usou.
+    model_revision: str | None = field(default_factory=lambda: os.getenv("MODEL_REVISION") or None)
 
     lora_layers: int = 8
     lora_rank: int = 8
@@ -94,6 +130,11 @@ class LoRAConfig:
 
     data_dir: Path = field(default_factory=lambda: DIR_DADOS_MLX)
     adapter_path: Path = field(default_factory=lambda: _do_ambiente("ADAPTER_PATH", DIR_ADAPTERS))
+
+    @property
+    def revisao_efetiva(self) -> str | None:
+        """A revisão fixada; na falta dela, a que o cache local registra. `None` se nenhuma."""
+        return self.model_revision or _revisao_em_cache(self.model)
 
     @property
     def lora_scale(self) -> float:
@@ -147,6 +188,12 @@ class LoRAConfig:
         """Registro legível da rodada, para gravar junto das métricas e dos adapters."""
         return {
             "model": self.model,
+            "model_revision": self.revisao_efetiva,
+            # Distingue garantia de observação: `True` significa que a revisão foi fixada e a
+            # próxima rodada baixará a mesma; `False`, que o SHA apenas descreve o que estava
+            # no cache naquele dia. Sem esta chave o artefato pareceria reprodutível quando
+            # não é.
+            "model_revision_fixada": self.model_revision is not None,
             "lora_layers": self.lora_layers,
             "lora_rank": self.lora_rank,
             "lora_alpha": self.lora_alpha,

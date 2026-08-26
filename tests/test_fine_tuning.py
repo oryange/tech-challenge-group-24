@@ -103,6 +103,28 @@ def test_adapter_path_do_ambiente_e_ancorado_na_raiz(monkeypatch):
     assert caminho.parts[-3:] == ("data", "fine_tuned", "adapters")
 
 
+def test_model_revision_do_ambiente_entra_no_registro(monkeypatch):
+    # Fixar a revisão é a única defesa contra uma retag upstream: nenhuma seed protege os
+    # pesos que vêm do Hub.
+    monkeypatch.setenv("MODEL_REVISION", "0cb88a4f764b7a12671c53f0838cd831a0843b95")
+
+    registro = LoRAConfig().to_dict()
+
+    assert registro["model_revision"] == "0cb88a4f764b7a12671c53f0838cd831a0843b95"
+    assert registro["model_revision_fixada"] is True
+
+
+def test_model_revision_ausente_nao_se_passa_por_fixada(monkeypatch):
+    # Sem MODEL_REVISION o registro ainda pode trazer o SHA lido do cache local, e é aí que
+    # mora a armadilha: um SHA observado descreve o que estava na máquina naquele dia, não
+    # o que a próxima rodada vai baixar. A flag impede que o artefato pareça reprodutível.
+    monkeypatch.delenv("MODEL_REVISION", raising=False)
+
+    registro = LoRAConfig().to_dict()
+
+    assert registro["model_revision_fixada"] is False
+
+
 def test_config_e_imutavel():
     # A config é gravada como registro da rodada; mutá-la depois do treino faria o registro
     # descrever algo que não aconteceu.
