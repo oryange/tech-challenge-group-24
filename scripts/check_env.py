@@ -130,14 +130,14 @@ def main() -> int:
         for p in ("data", "fine_tuning", "llm", "assistant", "graph", "database", "audit"):
             checa_import(f"src.{p}", f"src.{p}")
 
-    secao("4. APIs usadas pelo plano (LangChain 1.x)")
-    checa_import("PR 05 — classe base do LLM", "langchain_core.language_models.llms:LLM")
-    checa_import("PR 07 — prompt template", "langchain_core.prompts:ChatPromptTemplate")
-    checa_import("PR 07 — LCEL Runnable", "langchain_core.runnables:Runnable")
-    checa_import("PR 07 — histórico por sessão", "langchain_core.runnables.history:RunnableWithMessageHistory")
-    checa_import("PR 07 — store do histórico", "langchain_core.chat_history:InMemoryChatMessageHistory")
-    checa_import("PR 08 — StateGraph", "langgraph.graph:StateGraph")
-    checa_import("PR 03 — SQLAlchemy ORM", "sqlalchemy.orm:declarative_base")
+    secao("4. APIs usadas pelo projeto (LangChain 1.x)")
+    checa_import("classe base do LLM", "langchain_core.language_models.llms:LLM")
+    checa_import("prompt template", "langchain_core.prompts:ChatPromptTemplate")
+    checa_import("LCEL Runnable", "langchain_core.runnables:Runnable")
+    checa_import("histórico por sessão", "langchain_core.runnables.history:RunnableWithMessageHistory")
+    checa_import("store do histórico", "langchain_core.chat_history:InMemoryChatMessageHistory")
+    checa_import("StateGraph (LangGraph)", "langgraph.graph:StateGraph")
+    checa_import("SQLAlchemy ORM", "sqlalchemy.orm:declarative_base")
 
     secao("5. APIs legadas que o projeto NÃO deve usar")
     checa_ausencia("LLMChain (langchain 0.x)", "langchain.chains:LLMChain")
@@ -157,8 +157,8 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             globals()["falhas"] = falhas + 1
             print(f"{FALHA}| {'mlx device':34} | {type(exc).__name__}: {exc}")
-        checa_import("PR 04 — mlx_lm.generate", "mlx_lm:generate")
-        checa_import("PR 04 — mlx_lm.load", "mlx_lm:load")
+        checa_import("mlx_lm.generate", "mlx_lm:generate")
+        checa_import("mlx_lm.load", "mlx_lm:load")
 
     secao("7. Variáveis de ambiente (.env)")
     try:
@@ -179,7 +179,7 @@ def main() -> int:
         print(f"{OK}| {rotulo:34} | definido em {nome_token}")
     else:
         avisos += 1
-        print(f"{AVISO}| {rotulo:34} | ausente — necessário só no PR 04")
+        print(f"{AVISO}| {rotulo:34} | ausente — necessário no fine-tuning")
     for var in ("BASE_MODEL", "DB_PATH", "AUDIT_LOG_PATH", "ADAPTER_PATH"):
         valor = os.getenv(var)
         if valor:

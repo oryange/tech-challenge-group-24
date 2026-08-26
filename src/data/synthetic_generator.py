@@ -15,8 +15,8 @@ Três decisões que valem registro:
   `anonymizer` produziria (`[PACIENTE]`, `[MÉDICO]`, `[DATA]`), então rodar a anonimização
   em cima destes registros é uma operação nula — o `curator` pode aplicá-la sem risco.
 * **Toda resposta cita a fonte** (`[Fonte: Protocolo:J45]`). Isso ensina o modelo a citar,
-  que é o requisito de explainability; o guardrail do PR 05 valida a presença do marcador
-  em vez de precisar inventá-lo.
+  que é o requisito de explainability; o guardrail valida a presença do marcador em vez de
+  precisar inventá-lo.
 * **Toda resposta carrega o disclaimer de validação humana.** A posologia é fictícia e o
   assistente nunca prescreve por conta própria — é o limite de atuação exigido pelo
   enunciado, aprendido dos dados e não só imposto por filtro.
@@ -255,7 +255,7 @@ def generate_synthetic(
     """Gera `total` registros distribuídos entre os quatro tipos exigidos pelo enunciado.
 
     A geração é determinística por `seed` — sem isso, cada execução mudaria o dataset e as
-    métricas de avaliação do PR 04 não seriam comparáveis entre rodadas.
+    métricas de avaliação do modelo não seriam comparáveis entre rodadas.
     """
     rng = random.Random(seed)
     registros: list[dict[str, str]] = []

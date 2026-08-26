@@ -1,4 +1,0 @@
-lora_parameters:
-  dropout: 0.0
-  rank: 8
-  scale: 2.0

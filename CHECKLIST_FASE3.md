@@ -145,11 +145,11 @@ tech-challenge-group-24/
 
 ---
 
-### PR 03 — Banco de dados e dados de pacientes
+### PR 03 — Banco de dados e dados de pacientes ✅
 **Responsável:** Pessoa B  
 **Entrega:** SQLite com pacientes, exames, protocolos e histórico de consultas sintéticos
 
-- [ ] `src/database/models.py`
+- [x] `src/database/models.py`
   - `Base` declarativa SQLAlchemy
   - Model `Patient`: `id`, `name_anon`, `age`, `blood_type`, `allergies`, `conditions`
   - Model `Exam`: `id`, `patient_id` (FK), `type`, `status` (pending/done), `result`, `date`
@@ -167,7 +167,7 @@ tech-challenge-group-24/
     antes de abrir a conexão — SQLite não cria o diretório e falha com
     `unable to open database file` se `DB_PATH` apontar para um caminho novo
 
-- [ ] `src/database/seed.py`
+- [x] `src/database/seed.py`
   - Cria e popula o banco com dados sintéticos (sem PII real):
     - 20 pacientes com `name_anon` = `[PACIENTE_001]` ... `[PACIENTE_020]`
     - 2–4 exames por paciente (alguns com `status=pending`)
@@ -176,7 +176,7 @@ tech-challenge-group-24/
       queixa/avaliação/conduta coerentes com as `conditions` daquele paciente
   - Executável diretamente: `python -m src.database.seed`
 
-- [ ] `tests/test_data.py` (adicionar ou criar `test_database.py`)
+- [x] `tests/test_data.py` (adicionar ou criar `test_database.py`)
   - `test_patient_creation()` — cria paciente e recupera do banco
   - `test_exam_pending_query()` — filtra exames pendentes por paciente
   - `test_protocol_by_condition()` — busca protocolo por condição

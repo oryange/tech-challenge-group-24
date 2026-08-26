@@ -1,4 +1,4 @@
-"""Testes do pipeline de dados (PR 02)."""
+"""Testes do pipeline de dados."""
 
 from __future__ import annotations
 
@@ -307,7 +307,7 @@ def test_synthetic_cobre_todas_as_condicoes_cid10():
 
 
 def test_synthetic_toda_resposta_cita_fonte_e_exige_validacao():
-    # Explainability e limite de atuação vêm dos dados, não só do guardrail do PR 05.
+    # Explainability e limite de atuação vêm dos dados, não só do guardrail.
     for registro in generate_synthetic():
         assert f"[Fonte: {registro['source']}]" in registro["output"]
         assert "[Requer validação médica" in registro["output"]
@@ -402,7 +402,7 @@ def test_curator_quality_filter_descarta_campos_vazios():
 
 
 def test_curate_embaralha_para_o_split_do_fine_tuning(tmp_path):
-    # Sem embaralhar, o split sequencial 90/10 do PR 04 jogaria TODOS os registros
+    # Sem embaralhar, o split sequencial 90/10 do fine-tuning jogaria TODOS os registros
     # hospitalares na validação e o modelo nunca treinaria com os dados do hospital.
     pubmed = [_registro(instruction=f"p{i}", source=f"PubMedQA:{i}") for i in range(90)]
     hospital = [_registro(instruction=f"h{i}", source=f"Protocolo:{i}") for i in range(10)]

@@ -6,7 +6,7 @@ Uso, a partir da raiz do repositório:
     python -m src.data.synthetic_generator # gera data/synthetic/synthetic_hospital.jsonl
     python -m src.data.curator             # gera data/processed/dataset.jsonl
 
-O `dataset.jsonl` produzido aqui é a entrega do PR 02 e a entrada do fine-tuning (PR 04).
+O `dataset.jsonl` produzido aqui é a entrada do fine-tuning.
 """
 
 from __future__ import annotations
@@ -88,8 +88,8 @@ def curate(
     sem_duplicatas = deduplicate(anonimizados)
     filtrados = filter_by_quality(sem_duplicatas, min_palavras)
 
-    # Embaralhamento determinístico. O PR 04 faz split sequencial 90/10 treino/validação:
-    # sem embaralhar, os registros hospitalares (que vêm todos no fim do arquivo) cairiam
+    # Embaralhamento determinístico. O fine-tuning faz split sequencial 90/10
+    # treino/validação: sem embaralhar, os registros hospitalares (que vêm no fim) cairiam
     # inteiros na validação e o modelo nunca treinaria com os dados próprios do hospital.
     embaralhados = list(filtrados)
     random.Random(seed).shuffle(embaralhados)
