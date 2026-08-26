@@ -43,7 +43,19 @@ TOTAL_AMOSTRAS_PADRAO = 50
 MAX_TOKENS_PADRAO = 256
 
 
-_CHECKPOINT = re.compile(r"^(?P<iter>\d+)_adapters\.safetensors$")
+# Três decisões estreitas, todas para que dois arquivos diferentes não colidam na mesma
+# chave do dicionário — quando colidem, quem sobrevive depende da ordem do `iterdir()`, ou
+# seja, do sistema de arquivos, e o `best_checkpoint` pode carregar o arquivo errado:
+#
+# * `\Z` e não `$`: o `$` do Python casa também *antes* de um `\n` final, e nome de arquivo
+#   com quebra de linha é válido no Unix. Com `$`, `"200_adapters.safetensors\n"` casaria e
+#   disputaria a chave 200 com o arquivo legítimo.
+# * `[0-9]` e não `\d`: `\d` casa dígitos Unicode, e o `int()` os converte — `٢٠٠` (arábico-
+#   índico) viraria 200 e colidiria da mesma forma.
+# * `{1,12}`: teto no número de dígitos. Não é alcançável hoje (o `NAME_MAX` de 255 bytes já
+#   limita o nome a 234 dígitos, bem abaixo dos 4300 em que o `int()` recusa a conversão),
+#   mas é de graça e não depende de o limite do sistema de arquivos continuar onde está.
+_CHECKPOINT = re.compile(r"^(?P<iter>[0-9]{1,12})_adapters\.safetensors\Z")
 
 
 def available_checkpoints(adapter_dir: Path) -> dict[int, Path]:

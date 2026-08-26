@@ -446,6 +446,30 @@ def test_available_checkpoints_diretorio_inexistente(tmp_path):
     assert available_checkpoints(tmp_path / "nao_existe") == {}
 
 
+@pytest.mark.parametrize(
+    "nome",
+    [
+        "200_adapters.safetensors.bak",  # sufixo extra
+        "x200_adapters.safetensors",  # prefixo antes do número
+        "200_adapters.safetensors\n",  # `$` casaria antes do \n final; `\Z` não
+        "٢٠٠_adapters.safetensors",  # `\d` casa dígito Unicode e int() converte para 200
+    ],
+)
+def test_available_checkpoints_ignora_nome_parecido(tmp_path, nome):
+    # Cada intruso vai sozinho no diretório, de propósito. Junto com o checkpoint legítimo o
+    # teste não provaria nada: os dois cairiam na mesma chave 200, `sorted(...) == [200]`
+    # continuaria verdadeiro, e qual arquivo sobrevive dependeria da ordem do iterdir() — que
+    # é justamente o defeito. Sozinho, o resultado é determinístico: ou casa, ou não casa.
+    diretorio = tmp_path / "adapters"
+    diretorio.mkdir()
+    try:
+        (diretorio / nome).write_bytes(b"intruso")
+    except OSError:  # pragma: no cover - depende do sistema de arquivos
+        pytest.skip(f"o sistema de arquivos não aceita o nome {nome!r}")
+
+    assert available_checkpoints(diretorio) == {}
+
+
 def test_best_checkpoint_escolhe_menor_loss_com_arquivo_em_disco(tmp_path):
     # Validação a cada 50 iterações, checkpoint a cada 100: o menor valor da curva (iter 150)
     # não tem arquivo, então a escolha tem de recair no melhor entre os que existem.
