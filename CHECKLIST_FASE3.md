@@ -89,23 +89,23 @@ tech-challenge-group-24/
 
 ---
 
-### PR 02 — Pipeline de dados
+### PR 02 — Pipeline de dados ✅
 **Responsável:** Pessoa A  
 **Entrega:** dados prontos para fine-tuning em `data/processed/dataset.jsonl`
 
-- [ ] `src/data/loader.py`
+- [x] `src/data/loader.py`
   - Baixa PubMedQA via HuggingFace `datasets`
   - Filtra subset `pqa_labeled`
   - Converte para formato instruction-tuning: `{"instruction", "input", "output", "source"}`
   - Salva em `data/processed/pubmedqa.jsonl`
   - Executável diretamente: `python -m src.data.loader`
 
-- [ ] `src/data/anonymizer.py`
+- [x] `src/data/anonymizer.py`
   - Remove PII com regex: nomes, datas, CPF, telefones, emails
   - Substitui por tokens: `[PACIENTE]`, `[DATA]`, `[MÉDICO]`, `[PACIENTE_ID]`
   - Funções: `anonymize(text)` e `anonymize_record(dict)`
 
-- [ ] `src/data/synthetic_generator.py`
+- [x] `src/data/synthetic_generator.py`
   - Gera ~100 registros sintéticos cobrindo os quatro tipos exigidos pelo enunciado
     ("protocolos médicos do hospital; exemplos de perguntas frequentes feitas por médicos;
     modelos de laudos, receitas e procedimentos internos"):
@@ -119,20 +119,20 @@ tech-challenge-group-24/
   - Salva em `data/synthetic/synthetic_hospital.jsonl`
   - Executável diretamente: `python -m src.data.synthetic_generator`
 
-- [ ] `src/data/curator.py`
+- [x] `src/data/curator.py`
   - Merge de `pubmedqa.jsonl` + `synthetic_hospital.jsonl`
   - Aplica anonimização em todos os registros
   - Remove duplicatas e filtra respostas muito curtas (<20 palavras)
   - Salva dataset final em `data/processed/dataset.jsonl`
   - Executável diretamente: `python -m src.data.curator`
 
-- [ ] `notebooks/01_data_preparation.ipynb`
+- [x] `notebooks/01_data_preparation.ipynb`
   - Célula 1: carrega e exibe estatísticas do PubMedQA (total, distribuição de labels)
   - Célula 2: demonstra anonimização com exemplos antes/depois
   - Célula 3: exibe exemplos dos dados sintéticos gerados
   - Célula 4: estatísticas do dataset final (contagem, distribuição de fontes, tamanho médio)
 
-- [ ] `tests/test_data.py`
+- [x] `tests/test_data.py`
   - `test_anonymize_removes_name()` — regex de nome substitui corretamente
   - `test_anonymize_removes_date()` — datas são substituídas
   - `test_anonymize_record_keys_preserved()` — instruction/input/output preservados
