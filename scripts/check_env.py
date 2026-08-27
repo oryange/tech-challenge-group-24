@@ -106,6 +106,7 @@ def main() -> int:
         "sqlalchemy", "datasets", "evaluate", "huggingface-hub",
         "numpy", "pandas", "matplotlib", "jupyterlab", "ipykernel",
         "pytest", "nltk", "sacrebleu", "rouge-score", "python-dotenv",
+        "pyyaml", "transformers",
     ):
         v = versao(pacote)
         marca = FALHA if v == "não instalado" else OK

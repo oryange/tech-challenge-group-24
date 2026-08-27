@@ -41,6 +41,11 @@ logs/*
 # literal do corpus baixado — inofensivo por ser público, mas o loader não anonimiza nada,
 # então apontá-lo para um corpus interno versionaria o dado cru. Nunca commitar dado real
 # de paciente aqui.
+#
+# Exceção dentro dele: data/processed/mlx/ é intermediário do treino (split e YAML de
+# configuração), regenerado a partir do dataset.jsonl a cada execução do trainer. Versionar
+# duplicaria o entregável e o deixaria dessincronizado do dataset na primeira alteração.
+data/processed/mlx/
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
