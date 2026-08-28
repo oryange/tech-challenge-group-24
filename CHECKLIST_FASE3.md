@@ -274,27 +274,49 @@ tech-challenge-group-24/
 
 ---
 
-### PR 06 — Audit logger
+### PR 06 — Audit logger ✅
 **Responsável:** Pessoa A ou B  
-**Entrega:** sistema de logging estruturado para auditoria
+**Entrega:** sistema de logging estruturado para auditoria  
+**Branch:** `feat/pr06-audit-logger`
 
-- [ ] `src/audit/audit_logger.py`
+- [x] `src/audit/audit_logger.py`
   - Classe `AuditLogger`:
     - `__init__(log_path)`: inicializa com path do arquivo JSONL e cria o diretório pai
       (`os.makedirs(..., exist_ok=True)`) — sem isso, um `AUDIT_LOG_PATH` em diretório
       inexistente estoura `FileNotFoundError` na primeira escrita
     - `log(query, response, patient_id, source, guardrail_triggered, session_id)`:
       - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered"}`
+      - `query` e `response_preview` passam pelo `anonymize` do PR 02 antes de gravar: a
+        pergunta é texto livre digitado na hora e pode trazer nome, telefone ou prontuário
+        reais — dado que nenhum pipeline anterior viu, porque eles anonimizam dataset e
+        banco, não a conversa. Este arquivo é o único que persiste esse texto em disco, e
+        ainda é exibido no notebook de demonstração e no vídeo de entrega
+      - Anonimiza **antes** de recortar em 200 caracteres: recortando primeiro, o corte cai
+        no meio de um dado e a regra deixa de casar (um CPF partido perde os dois dígitos
+        finais que a regra exige), gravando o pedaço em claro
+      - `patient_id` fica fora da anonimização — já é token do seed do PR 03
+        (`[PACIENTE_007]`), e anonimizá-lo destruiria a chave de filtro sem proteger nada
+      - `ensure_ascii=False`, senão "asmática" vira "asmática" e a trilha fica
+        ilegível justamente na hora de exibi-la
     - `get_session_logs(session_id)`: retorna todos os logs de uma sessão
     - `get_patient_logs(patient_id)`: retorna histórico de consultas de um paciente
-  - Instância global `audit_logger` configurada via `.env`
+      (atravessa sessões de propósito — é o histórico do paciente, não o da conversa)
+    - leitura pula linha corrompida em vez de estourar: o caso real é o processo morrer no
+      meio de uma escrita, e uma trilha que se recusa a abrir por causa disso perde as
+      entradas íntegras junto com a quebrada
+  - Instância global `audit_logger` configurada via `.env` (fecha o `AUDIT_LOG_PATH`, que
+    era checado pelo `check_env` sem ninguém lê-lo — mesmo defeito que o PR 04 corrigiu no
+    `BASE_MODEL`)
 
-- [ ] `tests/test_audit_logger.py`
+- [x] `tests/test_audit_logger.py`
   - `test_log_creates_file()` — cria arquivo JSONL se não existir
   - `test_log_entry_has_required_fields()` — todos os campos obrigatórios presentes
   - `test_log_truncates_response()` — response_preview limitado a 200 chars
   - `test_get_session_logs_filters_correctly()` — filtra por session_id
   - `test_get_patient_logs_filters_correctly()` — filtra por patient_id
+  - `test_log_anonimiza_antes_de_recortar()` — CPF a cavaleiro do corte não vaza
+  - `test_log_anonimiza_pii_da_pergunta()` — nome na pergunta vira `[PACIENTE]`
+  - `test_linha_corrompida_nao_derruba_a_leitura()` — entradas íntegras sobrevivem
 
 **Dependências de outras PRs:** PR 01
 
