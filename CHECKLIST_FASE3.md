@@ -555,6 +555,15 @@ tech-challenge-group-24/
     pedir, histórico isolado entre sessões e entre instâncias, contexto não repetido a cada
     turno, paciente inexistente não chega a chamar o modelo, e o contexto clínico não
     aparecendo no `audit.jsonl`
+  - `test_ask_alerta_alergia_mesmo_quando_o_modelo_ignora()` e os de `alergias_citadas()` —
+    o alerta é do código, não do modelo; o teste programa o `FakeLLM` para responder
+    ignorando a alergia, que é o comportamento que foi medido no modelo real
+  - `test_ask_descarta_fonte_que_nao_confere_com_o_contexto()` e
+    `test_ask_mantem_fonte_que_confere()` — citação com data ou CID que não existe no
+    contexto entra na trilha como ausente, e é avisada
+  - `test_cortar_repeticao_pega_frase_curta_repetida()` — o buraco do piso de
+    `FRASE_MINIMA`, por onde passou uma resposta real com a mesma frase 30 vezes
+  - `test_deduplicar_fontes_*()` — citação repetida some, fontes diferentes ficam
 
 **Dependências de outras PRs:** PR 03, PR 05, PR 06
 
@@ -764,6 +773,22 @@ contra o `get_pending_exams` do banco, já com o bloco explícito de pendentes n
       usa de fato", e não o que está escrito em cada arquivo separadamente.
 - [ ] **Não** adicionar `repetition_penalty`: mexeria no `src/llm/model.py`, que é do PR 05,
       e a medição não sustentou o ganho.
+      - Reaberto e medido de novo depois das correções de integração, porque o docstring do
+        `cortar_repeticao` chama a penalidade de "correção de verdade" e as duas afirmações não
+        podiam ficar as duas de pé. Mesmo protocolo, 8 pacientes, já com o corte de frase curta
+        no lugar:
+
+        | Cenário | Acerto factual | Repetição média |
+        |---|---|---|
+        | sem penalidade | 7/8 | 0% |
+        | `repetition_penalty=1.1` | 6/8 | 0% |
+
+        Confirmada a decisão original: a penalidade não melhorou nada e o acerto factual não
+        subiu. A repetição zerada nos dois lados é do `cortar_repeticao`, não da penalidade —
+        o que também mostra o limite desta medição, feita sobre a resposta **depois** do corte:
+        ela não enxerga o loop que o modelo gastou tokens produzindo antes de ser truncado. O
+        ganho que a penalidade prometeria é o de não gerar o loop, e medi-lo exigiria instrumentar
+        a resposta crua. Enquanto isso não for feito, a afirmação do docstring segue não medida.
 
 A troca é acerto por fluidez, e vale: uma resposta correta e repetitiva é revisável, uma
 resposta fluente e errada não. Uma medição anterior, feita antes do bloco explícito de

@@ -172,9 +172,11 @@ def cortar_repeticao(texto: str) -> str:
     delas até esgotar o `max_tokens`. O conteúdo útil está antes do loop, então o corte não
     perde informação — só para de exibir a mesma frase catorze vezes.
 
-    É paliativo e não conserta a geração: a correção de verdade é `repetition_penalty` no
-    `mlx_lm.generate`, que mora no `src/llm/model.py` do PR 05. Fica aqui porque o assistente
-    não deve mostrar ao médico uma parede de texto repetido enquanto aquela decisão não sai.
+    É paliativo e não conserta a geração: o modelo continua gastando o `max_tokens` no loop,
+    e o que muda é só o que o médico vê. A correção na geração seria `repetition_penalty` no
+    `mlx_lm.generate`, medida duas vezes e sem ganho nas duas — ver a entrada P1 do
+    `CHECKLIST_FASE3.md`, que também registra por que a medição feita sobre a resposta já
+    cortada não é a que decidiria isso.
 
     A comparação é por similaridade e não por igualdade porque o loop degrada junto: as
     repetições vêm com erro de digitação ("hemoglobria" no lugar de "hemoglobina"), e
