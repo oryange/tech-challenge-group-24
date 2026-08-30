@@ -26,18 +26,34 @@ Sobre PII: a pergunta do médico é texto livre digitado na hora e pode conter n
 paciente, telefone ou prontuário — dados que nenhum dos pipelines anteriores viu, porque
 eles anonimizam dataset e banco, não a conversa. Este arquivo é o único artefato que
 persiste esse texto em disco, e ainda por cima é exibido no notebook de demonstração e no
-vídeo de entrega. Por isso tudo o que é texto livre passa pelo `anonymize` do PR 02 antes de
-ser gravado.
+vídeo de entrega. Por isso tudo o que é texto livre passa por `_anonimizar_conversa` antes
+de ser gravado: o `anonymize` do PR 02, mais as regras de `_PII_CONVERSA`.
+
+O que a anonimização daqui deliberadamente **não** garante: **nome não ancorado passa**. As
+regras do PR 02 são ancoradas em contexto ("paciente" + nome, "Dr." + nome) porque afrouxar
+isso destruiria termos legítimos do PubMedQA no dataset de treino, e a pergunta digitada na
+hora raramente traz a âncora — "Maria Silva está com febre" sai inteira no log. Detectar
+nome próprio solto por regex tem falso positivo caro em texto clínico (nome de medicamento,
+de escala, de sinal clínico), então não é resolvido aqui.
+
+A anonimização deste módulo é, portanto, **best-effort**: cobre os formatos inequívocos
+(datas, e-mail, CPF, telefone, prontuário ancorado) e não cobre nome livre. Registrar isso
+importa pelo mesmo motivo que o `guardrails.py` do PR 05 registra o alcance da denylist —
+uma garantia afirmada e não cumprida é pior que um limite declarado, porque some com a
+vigilância de quem lê. Enquanto o limite valer, `logs/audit.jsonl` é dado sensível: não sai
+do repositório, e o que for exibido no notebook ou no vídeo precisa ser conferido antes.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.data.anonymizer import anonymize
+from src.data.anonymizer import TOKEN_PACIENTE_ID, TOKEN_TELEFONE, anonymize
 
 RAIZ = Path(__file__).resolve().parents[2]
 CAMINHO_PADRAO = RAIZ / "logs" / "audit.jsonl"
@@ -63,6 +79,32 @@ LIMITE_TEXTO_LIVRE = 2000
 # máquina, sem que nada no fluxo denuncie isso.
 MODO_DIRETORIO = 0o700
 MODO_ARQUIVO = 0o600
+
+# Regras próprias da conversa, complementares ao `anonymize` do PR 02 — que fica intocado de
+# propósito: as âncoras de contexto existem lá para não destruir termos do PubMedQA, e
+# afrouxá-las degradaria o dataset de treino. Aqui o dado tem outra forma (alguém digitando
+# no chat) e outro destino (disco), então os formatos que dispensam âncora entram neste
+# módulo, que é quem conhece essa diferença.
+#
+# Onze dígitos soltos são ambíguos entre celular e CPF, e nenhuma regex desfaz isso sem
+# contexto. A primeira regra pega o formato do celular (DDD + 9 + oito dígitos); o que
+# sobrar de 10 ou 11 dígitos cai no token de identificador. Os dois são PII e o que importa
+# é que nenhum chegue ao disco — errar o rótulo entre eles é ruído, não vazamento.
+_PII_CONVERSA: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"(?<!\d)\d{2}9\d{8}(?!\d)"), TOKEN_TELEFONE),
+    (re.compile(r"(?<!\d)\d{10,11}(?!\d)"), TOKEN_PACIENTE_ID),
+)
+
+
+def _anonimizar_conversa(texto: str) -> str:
+    """Anonimiza texto livre da conversa: as regras do PR 02 mais as de `_PII_CONVERSA`.
+
+    Não cobre nome não ancorado — ver o limite declarado no topo do módulo.
+    """
+    resultado = anonymize(texto)
+    for regex, token in _PII_CONVERSA:
+        resultado = regex.sub(token, resultado)
+    return resultado
 
 
 def _caminho_do_ambiente(variavel: str, padrao: Path) -> Path:
@@ -103,6 +145,8 @@ class AuditLogger:
         source: str | None = None,
         guardrail_triggered: bool = False,
         session_id: str | None = None,
+        tem_fonte: bool | None = None,
+        motivos: tuple[str, ...] = (),
     ) -> dict:
         """Registra uma interação e devolve a entrada gravada.
 
@@ -119,17 +163,28 @@ class AuditLogger:
         O teto de `LIMITE_TEXTO_LIVRE` é o único corte que vem **antes** da anonimização, e
         não contradiz o parágrafo acima: ele é ordens de grandeza maior que o alcance das
         âncoras, então nenhuma regra deixa de casar por causa dele.
+
+        `tem_fonte` e `motivos` recebem o resto do `ResultadoGuardrails` do PR 05. Eles têm
+        default e a assinatura do checklist continua valendo, mas sem eles a métrica de
+        explainability — que é requisito do enunciado — seria calculada no PR 05 e não
+        chegaria a nenhum lugar persistido. `tem_fonte=None` distingue "não foi medido" de
+        "não tinha fonte", que numa auditoria são conclusões diferentes.
         """
         entrada = {
-            "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            # Milissegundos, não segundos: duas interações da mesma sessão cabem no mesmo
+            # segundo, e aí a trilha perde a ordem entre elas para quem lê o arquivo fora da
+            # ordem de escrita — que é o caso de qualquer análise que ordene por timestamp.
+            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "session_id": session_id,
             "patient_id": patient_id,
-            "query": anonymize((query or "")[:LIMITE_TEXTO_LIVRE]),
-            "response_preview": anonymize((response or "")[:LIMITE_TEXTO_LIVRE])[
-                :PREVIEW_CARACTERES
-            ],
+            "query": _anonimizar_conversa((query or "")[:LIMITE_TEXTO_LIVRE]),
+            "response_preview": _anonimizar_conversa(
+                (response or "")[:LIMITE_TEXTO_LIVRE]
+            )[:PREVIEW_CARACTERES],
             "source": source,
             "guardrail_triggered": guardrail_triggered,
+            "tem_fonte": tem_fonte,
+            "motivos": list(motivos),
         }
         # `ensure_ascii=False` mantém o português legível no arquivo: com o padrão, "asmática"
         # vira "asmática" e a trilha fica ilegível justamente na hora de exibi-la.
@@ -148,10 +203,16 @@ class AuditLogger:
         processo morrer no meio de uma escrita e deixar a última linha pela metade — e uma
         trilha de auditoria que se recusa a abrir por causa disso perde as entradas íntegras
         junto com a quebrada, que é o pior dos dois resultados.
+
+        Puladas, mas não em silêncio. Descartar sem rastro faz "não consigo ler uma linha" e
+        "não consigo ler nenhuma" terminarem no mesmo resultado mudo: com o arquivo inteiro
+        corrompido, a consulta devolve `[]` e a leitura conclui "não houve interação" em vez
+        de "a trilha está ilegível" — a conclusão oposta, e a mais perigosa numa auditoria.
         """
         if not self.log_path.exists():
             return []
         entradas = []
+        descartadas = 0
         with self.log_path.open(encoding="utf-8") as arquivo:
             for linha in arquivo:
                 linha = linha.strip()
@@ -160,7 +221,14 @@ class AuditLogger:
                 try:
                     entradas.append(json.loads(linha))
                 except json.JSONDecodeError:
-                    continue
+                    descartadas += 1
+        if descartadas:
+            # 3 = quem chamou `get_session_logs`/`get_patient_logs`. Com o default o aviso
+            # apontaria para dentro deste arquivo, que não é onde alguém pode agir.
+            warnings.warn(
+                f"{descartadas} linha(s) ilegível(is) descartada(s) em {self.log_path}",
+                stacklevel=3,
+            )
         return entradas
 
     def get_session_logs(self, session_id: str) -> list[dict]:

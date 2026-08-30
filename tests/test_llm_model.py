@@ -161,6 +161,24 @@ def test_cache_separa_baseline_de_finetuned(mlx_falso, tmp_path):
     assert mlx_falso["loads"][1][1] == str(tmp_path)
 
 
+def test_cache_descarta_a_combinacao_mais_antiga(mlx_falso, tmp_path):
+    # Cada entrada são GB de pesos vivos: sem teto, um processo que varre combinações
+    # acumularia todas até estourar a memória da máquina.
+    adapters = []
+    for indice in range(modulo_llm._LIMITE_MODELOS_EM_CACHE + 1):
+        caminho = tmp_path / f"adapter_{indice}"
+        caminho.mkdir()
+        adapters.append(str(caminho))
+        _llm(adapter_path=str(caminho)).invoke("Pergunta.")
+
+    assert len(modulo_llm._MODELOS_CARREGADOS) == modulo_llm._LIMITE_MODELOS_EM_CACHE
+
+    # O primeiro saiu do cache, então volta a ser carregado do zero.
+    _llm(adapter_path=adapters[0]).invoke("Pergunta.")
+
+    assert len(mlx_falso["loads"]) == modulo_llm._LIMITE_MODELOS_EM_CACHE + 2
+
+
 def test_call_falha_cedo_se_o_adapter_nao_existe(mlx_falso, tmp_path):
     inexistente = tmp_path / "adapters_que_nao_foram_treinados"
 
@@ -184,6 +202,18 @@ def test_from_env_le_o_ambiente(monkeypatch, tmp_path):
     assert llm.revision == "0cb88a4f764b7a12671c53f0838cd831a0843b95"
     assert llm.max_tokens == 128
     assert llm.temperature == 0.5
+
+
+def test_from_env_serve_o_baseline(monkeypatch, tmp_path):
+    # `ADAPTER_PATH` tem default sempre presente no `LoRAConfig`, então não existe valor de
+    # ambiente que produza o baseline: sem esta chave, o outro lado da comparação do
+    # relatório não teria como ser montado a partir do `.env`.
+    monkeypatch.setenv("ADAPTER_PATH", str(tmp_path))
+
+    llm = MedicalMLXLLM.from_env(com_adapter=False)
+
+    assert llm.adapter_path is None
+    assert MedicalMLXLLM.from_env().adapter_path == str(tmp_path)
 
 
 def test_from_env_cai_nos_padroes(monkeypatch):

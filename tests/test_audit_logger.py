@@ -23,6 +23,8 @@ CAMPOS_OBRIGATORIOS = {
     "response_preview",
     "source",
     "guardrail_triggered",
+    "tem_fonte",
+    "motivos",
 }
 
 
@@ -86,6 +88,37 @@ def test_log_anonimiza_pii_da_pergunta(logger):
 
     assert "João Silva" not in entrada["query"]
     assert "[PACIENTE]" in entrada["query"]
+
+
+def test_log_anonimiza_telefone_sem_formatacao(logger):
+    # As regras do PR 02 exigem parênteses ou o +55; quem digita no chat escreve o número
+    # corrido, e é esse que ia para o disco.
+    entrada = _log(logger, query="Ligar para 11987654321.")
+
+    assert "11987654321" not in entrada["query"]
+    assert "[TELEFONE]" in entrada["query"]
+
+
+def test_log_anonimiza_cpf_sem_pontuacao(logger):
+    # Sem a âncora "CPF" na frente, a regra do PR 02 não casa o número solto.
+    entrada = _log(logger, query="Confirmar cadastro 12345678901 antes da consulta.")
+
+    assert "12345678901" not in entrada["query"]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Limite declarado no módulo: as regras do PR 02 são ancoradas em contexto para não "
+        "destruir o dataset de treino, e detectar nome próprio solto por regex tem falso "
+        "positivo caro em texto clínico. Registrado como falha esperada para não virar "
+        "garantia implícita."
+    ),
+)
+def test_log_anonimiza_nome_sem_ancora(logger):
+    entrada = _log(logger, query="Maria Silva está com febre há 3 dias.")
+
+    assert "Maria Silva" not in entrada["query"]
 
 
 def test_log_anonimiza_antes_de_recortar(logger):
@@ -196,9 +229,37 @@ def test_linha_corrompida_nao_derruba_a_leitura(logger):
         arquivo.write('{"session_id": "s1", "query": pela met\n')
     _log(logger, session_id="s1", query="Íntegra depois.")
 
-    entradas = logger.get_session_logs("s1")
+    with pytest.warns(UserWarning, match="ilegível"):
+        entradas = logger.get_session_logs("s1")
 
     assert [e["query"] for e in entradas] == ["Íntegra antes.", "Íntegra depois."]
+
+
+def test_linha_corrompida_nao_e_descartada_em_silencio(logger):
+    # Trilha inteira ilegível devolve [], que é indistinguível de "não houve interação" —
+    # a conclusão oposta, e a pior das duas numa auditoria.
+    logger.log_path.write_text("nem json é\ntampouco isto\n", encoding="utf-8")
+
+    with pytest.warns(UserWarning, match="2 linha"):
+        assert logger.get_session_logs("s1") == []
+
+
+def test_log_registra_a_explainability_do_pr05(logger):
+    # `tem_fonte` é a métrica de explainability do enunciado: calculada no PR 05, ela só
+    # existe depois da entrega se alguém a persistir.
+    entrada = _log(logger, tem_fonte=False, motivos=("sem_fonte", "prescricao_na_pergunta"))
+
+    assert entrada["tem_fonte"] is False
+    assert entrada["motivos"] == ["sem_fonte", "prescricao_na_pergunta"]
+
+
+def test_explainability_ausente_nao_vira_negativa(logger):
+    # None é "não foi medido"; False é "não tinha fonte". Numa auditoria são conclusões
+    # diferentes, e achatar as duas em False inventaria um resultado.
+    entrada = _log(logger)
+
+    assert entrada["tem_fonte"] is None
+    assert entrada["motivos"] == []
 
 
 def test_from_env_le_o_caminho(monkeypatch, tmp_path):

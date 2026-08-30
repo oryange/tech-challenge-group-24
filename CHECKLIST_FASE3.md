@@ -264,9 +264,13 @@ tech-challenge-group-24/
   - Carregamento lazy do modelo (singleton com cache)
     - chave `(modelo, adapter, revisão)`: com o adapter fora da chave, a comparação
       baseline vs fine-tuned do notebook recebe os mesmos pesos nas duas pontas
+    - teto de 2 combinações, descartando a menos usada recentemente: cada entrada são GB de
+      pesos vivos, e um cache sem limite acumula até a memória da máquina acabar
   - Parâmetros: `model_path`, `adapter_path`, `max_tokens=512`, `temperature=0.2`
-  - `from_env()`: reusa o `LoRAConfig` para resolver `BASE_MODEL`/`ADAPTER_PATH` e liga
-    `MAX_TOKENS` e `TEMPERATURE`, que estavam no `.env.example` sem nada consumindo
+  - `from_env(com_adapter=True)`: reusa o `LoRAConfig` para resolver `BASE_MODEL`/`ADAPTER_PATH`
+    e liga `MAX_TOKENS` e `TEMPERATURE`, que estavam no `.env.example` sem nada consumindo
+    - `com_adapter=False` serve o baseline: `ADAPTER_PATH` tem default sempre presente, então
+      não existe valor de `.env` que produza o modelo base sem esta chave
   - `model_config = ConfigDict(protected_namespaces=())`: o Pydantic v2 reserva o prefixo
     `model_` e avisa a cada instanciação de um campo `model_path`
 
@@ -274,8 +278,11 @@ tech-challenge-group-24/
   - `sanitize_input(text)`:
     - Remove tentativas de prompt injection (padrões `ignore previous`, `you are now`, `jailbreak`)
     - Limita tamanho máximo de input (trunca em 2000 chars)
-    - Trunca **antes** de rodar as regex, e substitui por marcador em vez de apagar:
-      apagar cola as pontas e reconstrói a instrução que se queria eliminar
+    - Trunca **antes e depois** de rodar as regex. Antes, para uma entrada de dezenas de MB
+      não passar inteira pelo motor de regex; depois, porque o marcador é maior que o padrão
+      que substitui e a saída cresceria acima do teto (e a função deixaria de ser idempotente)
+    - Substitui por marcador em vez de apagar: apagar cola as pontas e reconstrói a instrução
+      que se queria eliminar
     - Regex sem quantificador aninhado — um `(\s+\w+)+` transformaria a sanitização num
       vetor de negação de serviço por backtracking
   - `check_prescription_attempt(text)`:
@@ -285,7 +292,9 @@ tech-challenge-group-24/
   - `validate_response(response)`:
     - Verifica se a resposta contém `[Fonte:` e `[Requer validação médica]`
     - Se não, adiciona footer padrão: `\n[Requer validação médica por profissional habilitado]`
-    - A marca é comparada por **prefixo**, senão uma variante da frase leva rodapé dobrado
+    - A marca é comparada por **prefixo**, senão uma variante da frase leva rodapé dobrado, e
+      só vale quando **fecha** o texto: o modelo pode citar a frase no meio da resposta, e
+      aceitá-la em qualquer posição deixaria a resposta sair sem marca nenhuma no fim
     - Fonte ausente é reportada, nunca preenchida: um `[Fonte:]` fabricado aqui destrói a
       explainability que o campo existe para dar
   - `apply_guardrails(query, response)`:
@@ -303,14 +312,19 @@ tech-challenge-group-24/
   - `test_validate_response_keeps_existing()` — não duplica disclaimer se já existe
   - `test_apply_guardrails_full_flow()` — fluxo completo com mock
   - `test_sanitize_neutraliza_sem_reconstruir_o_ataque()` — saída sem nenhum padrão residual
+  - `test_sanitize_respeita_o_limite_com_entrada_hostil()` — o teto vale mesmo quando a
+    substituição faz o texto crescer, e a função segue idempotente
+  - `test_validate_response_exige_a_marca_fechando_o_texto()` — a frase citada no meio da
+    resposta não conta como rodapé
   - `test_apply_guardrails_detecta_prescricao_so_na_resposta()` — posologia não solicitada
   - `test_apply_guardrails_nao_inventa_fonte()` — ausência reportada, não remendada
 
 - [x] `tests/test_llm_model.py` (não estava no plano; o wrapper também precisa de teste)
   - `mlx_lm` é substituído por módulo falso em `sys.modules`, não por `monkeypatch` sobre o
     pacote real: a suíte precisa rodar fora do Apple Silicon, onde o `mlx-lm` nem é instalado
-  - cobre chat template, `stop`, repasse de `temperature`/`max_tokens`, cache do modelo,
-    separação baseline vs fine-tuned e `from_env()`
+  - cobre chat template, `stop`, repasse de `temperature`/`max_tokens`, cache do modelo
+    (separação baseline vs fine-tuned e descarte ao passar do teto) e `from_env()` nas duas
+    pontas — com adapter e servindo o baseline
 
 **Dependências de outras PRs:** PR 01
 
@@ -326,13 +340,29 @@ tech-challenge-group-24/
     - `__init__(log_path)`: inicializa com path do arquivo JSONL e cria o diretório pai
       (`os.makedirs(..., exist_ok=True)`) — sem isso, um `AUDIT_LOG_PATH` em diretório
       inexistente estoura `FileNotFoundError` na primeira escrita
-    - `log(query, response, patient_id, source, guardrail_triggered, session_id)`:
-      - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered"}`
-      - `query` e `response_preview` passam pelo `anonymize` do PR 02 antes de gravar: a
+    - `log(query, response, patient_id, source, guardrail_triggered, session_id, tem_fonte,
+      motivos)`:
+      - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered", "tem_fonte", "motivos"}`
+      - `tem_fonte` e `motivos` fecham o `ResultadoGuardrails` do PR 05: têm default, então a
+        assinatura acima continua válida, mas sem eles a métrica de explainability seria
+        calculada no PR 05 e não chegaria a nada persistido. `tem_fonte=None` é "não foi
+        medido", diferente de `False` ("não tinha fonte")
+      - `timestamp` com resolução de milissegundos: duas interações da mesma sessão cabem no
+        mesmo segundo, e aí quem ordena por timestamp perde a ordem entre elas
+      - `query` e `response_preview` passam por `_anonimizar_conversa` antes de gravar: a
         pergunta é texto livre digitado na hora e pode trazer nome, telefone ou prontuário
         reais — dado que nenhum pipeline anterior viu, porque eles anonimizam dataset e
         banco, não a conversa. Este arquivo é o único que persiste esse texto em disco, e
         ainda é exibido no notebook de demonstração e no vídeo de entrega
+      - `_anonimizar_conversa` = `anonymize` do PR 02 + `_PII_CONVERSA` (CPF e celular sem
+        formatação). As regras do PR 02 são ancoradas em contexto para não destruir termos do
+        PubMedQA, e quem digita no chat raramente traz a âncora; complementar aqui evita
+        afrouxar o anonymizer e degradar o dataset de treino
+      - **Limite declarado:** nome não ancorado passa ("Maria Silva está com febre" sai
+        inteiro). Detectar nome próprio solto por regex tem falso positivo caro em texto
+        clínico, então o módulo documenta a anonimização como best-effort em vez de afirmar
+        uma garantia que não dá — mesmo critério da denylist do PR 05. Enquanto valer,
+        `logs/audit.jsonl` é dado sensível e o que for exibido no vídeo precisa ser conferido
       - Anonimiza **antes** de recortar em 200 caracteres: recortando primeiro, o corte cai
         no meio de um dado e a regra deixa de casar (um CPF partido perde os dois dígitos
         finais que a regra exige), gravando o pedaço em claro
@@ -346,6 +376,9 @@ tech-challenge-group-24/
     - leitura pula linha corrompida em vez de estourar: o caso real é o processo morrer no
       meio de uma escrita, e uma trilha que se recusa a abrir por causa disso perde as
       entradas íntegras junto com a quebrada
+      - mas emite `warnings.warn` com a contagem: descartar em silêncio faz "uma linha
+        ilegível" e "arquivo inteiro ilegível" terminarem no mesmo `[]`, e aí a leitura
+        conclui "não houve interação" em vez de "a trilha está ilegível"
   - ~~Instância global `audit_logger`~~ → acessor `get_audit_logger()`, configurado via
     `.env` (fecha o `AUDIT_LOG_PATH`, que era checado pelo `check_env` sem ninguém lê-lo —
     mesmo defeito que o PR 04 corrigiu no `BASE_MODEL`)
@@ -363,9 +396,16 @@ tech-challenge-group-24/
   - `test_get_patient_logs_filters_correctly()` — filtra por patient_id
   - `test_log_anonimiza_antes_de_recortar()` — CPF a cavaleiro do corte não vaza
   - `test_log_anonimiza_pii_da_pergunta()` — nome na pergunta vira `[PACIENTE]`
-  - `test_linha_corrompida_nao_derruba_a_leitura()` — entradas íntegras sobrevivem
+  - `test_log_anonimiza_telefone_sem_formatacao()` e `test_log_anonimiza_cpf_sem_pontuacao()`
+    — as formas que quem digita no chat usa, e que as âncoras do PR 02 não pegam
+  - `test_log_anonimiza_nome_sem_ancora()` — `xfail(strict=True)`: registra o limite conhecido
+    como falha esperada, para que ele não vire garantia implícita nem passe despercebido caso
+    alguém o resolva
+  - `test_linha_corrompida_nao_derruba_a_leitura()` — entradas íntegras sobrevivem, e o
+    descarte é avisado
+  - `test_log_registra_a_explainability_do_pr05()` — `tem_fonte` e `motivos` são persistidos
 
-**Dependências de outras PRs:** PR 01
+**Dependências de outras PRs:** PR 01, PR 02 (o módulo importa `src.data.anonymizer`)
 
 ---
 

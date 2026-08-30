@@ -43,6 +43,14 @@ RODAPE_VALIDACAO = "[Requer validação médica por profissional habilitado]"
 MARCA_VALIDACAO = "[Requer validação médica"
 MARCA_FONTE = "[Fonte:"
 
+# A marca precisa *fechar* a resposta, não apenas aparecer nela. O modelo foi fine-tuned com
+# textos que carregam essa frase, então ele pode citá-la no meio do que responde — e uma
+# resposta como "o laudo trazia [Requer validação médica] na época" tem a marca sem ter o
+# rodapé. Casar até o colchete que fecha, no fim do texto, mantém o motivo do prefixo de pé:
+# a variante "[Requer validação médica antes da conduta]" continua valendo por si.
+# `[^\]]*` não aninha quantificador — o casamento segue linear no tamanho da resposta.
+_MARCA_VALIDACAO_NO_FIM = re.compile(rf"{re.escape(MARCA_VALIDACAO)}[^\]]*\]\s*\Z")
+
 AVISO_PRESCRICAO = (
     "[Este assistente não emite prescrição. O conteúdo abaixo é apoio à decisão clínica e "
     "precisa de validação por profissional habilitado antes de qualquer conduta.]"
@@ -95,21 +103,27 @@ class ResultadoGuardrails:
 def sanitize_input(texto: str | None) -> str:
     """Trunca a entrada e neutraliza tentativas conhecidas de prompt injection.
 
-    A ordem é deliberada: **trunca antes de casar as regex**. Ao contrário, uma entrada de
-    dezenas de MB passaria inteira pelo motor de regex antes de ser cortada.
+    O corte acontece **duas vezes, e as duas são necessárias**. Antes das regex, porque uma
+    entrada de dezenas de MB passaria inteira pelo motor de regex antes de ser cortada.
+    Depois delas, porque o marcador é maior que os padrões que substitui: `"jailbreak"`
+    (9 caracteres) vira `"[instrução removida]"` (20), e uma entrada hostil de 2000
+    caracteres sai com mais de 4000 se o teto não for reaplicado. Sem o segundo corte a
+    função também deixa de ser idempotente, já que a segunda passagem encurtaria o que a
+    primeira devolveu.
 
     A neutralização substitui por um marcador em vez de apagar. Apagar reconstrói o ataque:
     `re.sub` percorre a entrada uma única vez e não reexamina o que já escreveu, então
     remover a ocorrência interna de `"ignignore previousore previous"` cola as pontas e
     devolve `"ignore previous"` — exatamente a instrução que se queria eliminar. Trocando
-    por um marcador, as pontas não se encontram.
+    por um marcador, as pontas não se encontram. O corte final não tem esse risco: truncar
+    só descarta sufixo, nunca junta duas pontas.
     """
     if not texto:
         return ""
     limpo = texto[:LIMITE_CARACTERES]
     for padrao in _PADROES_INJECAO:
         limpo = padrao.sub(MARCADOR_INSTRUCAO_REMOVIDA, limpo)
-    return limpo
+    return limpo[:LIMITE_CARACTERES]
 
 
 def check_prescription_attempt(texto: str | None) -> tuple[bool, str]:
@@ -134,13 +148,17 @@ def check_prescription_attempt(texto: str | None) -> tuple[bool, str]:
 def validate_response(resposta: str | None) -> str:
     """Garante que a resposta carregue o rodapé de validação humana.
 
+    O rodapé é o requisito central do enunciado ("nunca prescrever sem validação humana"), e
+    por isso a marca só conta quando **fecha** a resposta: uma citação da frase no meio do
+    texto deixaria a resposta sair sem nada no fim (ver `_MARCA_VALIDACAO_NO_FIM`).
+
     Não mexe na fonte de propósito. Se a resposta não cita `[Fonte: ...]`, o que falta é
     rastreabilidade, e acrescentar um `[Fonte:]` genérico aqui produziria uma citação que o
     modelo não fez — quebrando justamente a explainability que o campo existe para dar.
     A ausência é reportada em `ResultadoGuardrails.tem_fonte`, não remendada.
     """
     texto = (resposta or "").strip()
-    if MARCA_VALIDACAO in texto:
+    if _MARCA_VALIDACAO_NO_FIM.search(texto):
         return texto
     return f"{texto}\n{RODAPE_VALIDACAO}".strip()
 

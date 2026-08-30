@@ -41,6 +41,19 @@ def test_sanitize_trunca_no_limite():
     assert len(sanitize_input("a" * (LIMITE_CARACTERES * 3))) == LIMITE_CARACTERES
 
 
+def test_sanitize_respeita_o_limite_com_entrada_hostil():
+    # A entrada de "a" nunca casa padrão nenhum e por isso não testa o teto de verdade: o
+    # marcador é maior que o padrão que substitui, então é a entrada hostil que faz a saída
+    # crescer depois do corte.
+    hostil = "jailbreak " * 300
+
+    limpo = sanitize_input(hostil)
+
+    assert len(limpo) <= LIMITE_CARACTERES
+    # E o teto reaplicado é o que mantém a função idempotente nesse caso.
+    assert sanitize_input(limpo) == limpo
+
+
 def test_sanitize_preserva_pergunta_legitima():
     pergunta = "Qual a conduta inicial na crise asmática em adulto?"
 
@@ -92,6 +105,17 @@ def test_validate_response_reconhece_variante_do_rodape():
     resposta = "Conduta sugerida. [Requer validação médica antes da conduta]"
 
     assert validate_response(resposta) == resposta
+
+
+def test_validate_response_exige_a_marca_fechando_o_texto():
+    # O modelo foi treinado com textos que carregam essa frase, então ele pode citá-la no
+    # meio da resposta. Aceitar a marca em qualquer posição deixaria a resposta sair sem
+    # nenhuma marca no fim — que é justamente o que o enunciado exige.
+    resposta = "Paciente citou [Requer validação médica] em nota antiga."
+
+    validada = validate_response(resposta)
+
+    assert validada.endswith(RODAPE_VALIDACAO)
 
 
 def test_apply_guardrails_full_flow():
