@@ -438,13 +438,21 @@ class MedicalAssistant:
 
         historico = self._historico_da_sessao(session_id)
 
+        # O contexto como o modelo de fato o recebe. Materializado numa variável porque é ele
+        # que a conferência de fonte adiante usa: sem paciente selecionado o modelo lê o
+        # `SEM_CONTEXTO`, e conferir a citação contra `None` seria conferir contra uma coisa
+        # que não foi entregue a ninguém. Hoje as duas formas dão o mesmo veredito — o
+        # `SEM_CONTEXTO` não contém data nem CID —, então isto não corrige comportamento: fixa
+        # a referência certa antes que uma mudança naquele texto faça as duas divergirem.
+        contexto_efetivo = contexto or SEM_CONTEXTO
+
         # Os marcadores de bloco são desarmados no dado que entra, aqui e no `build_prompt`:
         # a chain monta o prompt pelo `ChatPromptTemplate` e não passa pelo `build_prompt`,
         # então a proteção precisa existir nos dois caminhos ou vale só num deles.
         bruta = self.chain.invoke(
             {
                 "system": SYSTEM_PROMPT,
-                "patient_context": neutralizar_delimitadores(contexto or SEM_CONTEXTO),
+                "patient_context": neutralizar_delimitadores(contexto_efetivo),
                 "history": neutralizar_delimitadores(
                     self._formatar_historico(historico) or "(primeira pergunta desta sessão)"
                 ),
@@ -475,8 +483,7 @@ class MedicalAssistant:
         fonte = extrair_fonte(resposta)
         # Fonte citada que não corresponde ao contexto não vai para a trilha como se fosse
         # boa: ela é registrada como ausente, que é a conclusão correta para quem audita.
-        fonte_valida = fonte_confere(fonte, contexto)
-        if fonte and not fonte_valida:
+        if fonte and not fonte_confere(fonte, contexto_efetivo):
             warnings.warn(
                 f"Fonte citada sem correspondência no contexto do paciente: {fonte!r}. "
                 "Registrada na trilha como ausente.",
@@ -495,6 +502,11 @@ class MedicalAssistant:
             source=fonte,
             guardrail_triggered=resultado.guardrail_triggered,
             session_id=session_id,
+            # `fonte is not None`, e não o `resultado.tem_fonte` do PR 05: os dois medem
+            # explainability, mas o do guardrail responde "citou alguma coisa?" e este
+            # responde "citou algo que confere com o contexto?". Gravar o do guardrail deixaria
+            # a trilha com `source: null` e `tem_fonte: true` na mesma linha — duas afirmações
+            # contraditórias sobre a mesma resposta, e a auditoria sem como saber qual vale.
             tem_fonte=fonte is not None,
             motivos=resultado.motivos,
         )

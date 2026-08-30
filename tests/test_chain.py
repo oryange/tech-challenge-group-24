@@ -429,6 +429,30 @@ def test_deduplicar_fontes_lida_com_colchete_aninhado():
     assert "[CID J45]" in deduplicado
 
 
+def test_ask_sem_paciente_nao_aceita_cid_citado_do_nada(assistente):
+    # Sem paciente o modelo lê o SEM_CONTEXTO: não há de onde uma citação de CID ter saído.
+    # A conferência tem de olhar o que o modelo recebeu, e não o `contexto` cru, que é None.
+    assistente.llm.resposta = "Conduta geral. [Fonte: protocolo CID J45]"
+
+    with pytest.warns(UserWarning, match="sem correspondência"):
+        resultado = assistente.ask("O que é asma?")
+
+    assert resultado["source"] is None
+
+
+def test_ask_trilha_nao_registra_fonte_ausente_como_explainability(assistente, tmp_path):
+    # `source: null` com `tem_fonte: true` seriam duas afirmações contraditórias sobre a mesma
+    # resposta, e quem audita não teria como saber qual vale.
+    assistente.llm.resposta = "Houve melhora. [Fonte: consulta de 09/09/1999]"
+
+    with pytest.warns(UserWarning):
+        assistente.ask("Como foi a consulta?", patient_id=PACIENTE)
+
+    entrada = json.loads(assistente.audit_logger.log_path.read_text(encoding="utf-8").strip())
+    assert entrada["source"] is None
+    assert entrada["tem_fonte"] is False
+
+
 def test_fonte_generica_sem_identificador_passa():
     # Não há data nem CID para conferir; barrar a forma genérica só faria o modelo citar menos.
     assert fonte_confere("exames do paciente", "Exames PENDENTES: hemograma") is True

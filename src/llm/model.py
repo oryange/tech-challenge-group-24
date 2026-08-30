@@ -47,7 +47,6 @@ MAX_TOKENS_PADRAO = 512
 # paciente isolado, não.
 TEMPERATURE_PADRAO = 0.7
 
-
 # Chave: (modelo, adapter, revisão). Valor: (modelo carregado, tokenizer).
 #
 # Carregar o Llama-3.2-3B custa dezenas de segundos e alguns GB de RAM, e o `_call` roda uma
