@@ -698,23 +698,25 @@ Medidas rodando o assistente completo contra o modelo fine-tuned real, não em t
 mock. Nenhuma delas é defeito do PR 07 — o prompt chega ao modelo correto e completo, o que
 dá para conferir trocando o LLM pelo `FakeLLM` de `tests/test_chain.py`.
 
-### P1 — `TEMPERATURE=0.2` derruba o acerto factual (config, PR 07)
+### P1 — `TEMPERATURE=0.2` derruba o acerto factual (config, PR 07) ✅
 
 Perguntando "quais exames estão pendentes?" aos 8 primeiros pacientes e conferindo a resposta
 contra o `get_pending_exams` do banco, já com o bloco explícito de pendentes no contexto:
 
 | Cenário | Acerto factual | Repetição média |
 |---|---|---|
-| `temp=0.2` (atual) | 2/8 | 37% |
-| `temp=0.7` | 6/8 | 45% |
+| `temp=0.2` (anterior) | 2/8 | 37% |
+| `temp=0.7` (atual) | 6/8 | 45% |
 
 - [x] `TEMPERATURE_PADRAO` em `src/llm/model.py` passou de `0.2` para `0.7`. A leitura
       original — "é configuração, nenhuma linha de código" — estava incompleta: o padrão
       embutido é o que vale para quem clona o repositório sem definir a variável, e deixá-lo
       em `0.2` faria o valor recomendado e o comportamento de fábrica discordarem.
-- [ ] Trocar `TEMPERATURE=0.2` por `0.7` no `.env` e no `.env.example`. O `from_env()` do
-      PR 05 já lê a variável, e enquanto ela estiver definida em `0.2` ela **vence** o padrão
-      acima — essa é a metade que ainda falta.
+- [x] `TEMPERATURE=0.7` no `.env` e no `.env.example`. O `from_env()` do PR 05 lê a variável,
+      e ela **vence** o padrão embutido — trocar só o código teria deixado o valor efetivo em
+      `0.2` sem nada denunciar. Conferido pelo caminho da aplicação (`load_dotenv` seguido de
+      `MedicalMLXLLM.from_env().temperature`), que é o que responde "qual valor o assistente
+      usa de fato", e não o que está escrito em cada arquivo separadamente.
 - [ ] **Não** adicionar `repetition_penalty`: mexeria no `src/llm/model.py`, que é do PR 05,
       e a medição não sustentou o ganho.
 
