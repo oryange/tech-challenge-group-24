@@ -254,9 +254,13 @@ tech-challenge-group-24/
   - Carregamento lazy do modelo (singleton com cache)
     - chave `(modelo, adapter, revisão)`: com o adapter fora da chave, a comparação
       baseline vs fine-tuned do notebook recebe os mesmos pesos nas duas pontas
+    - teto de 2 combinações, descartando a menos usada recentemente: cada entrada são GB de
+      pesos vivos, e um cache sem limite acumula até a memória da máquina acabar
   - Parâmetros: `model_path`, `adapter_path`, `max_tokens=512`, `temperature=0.2`
-  - `from_env()`: reusa o `LoRAConfig` para resolver `BASE_MODEL`/`ADAPTER_PATH` e liga
-    `MAX_TOKENS` e `TEMPERATURE`, que estavam no `.env.example` sem nada consumindo
+  - `from_env(com_adapter=True)`: reusa o `LoRAConfig` para resolver `BASE_MODEL`/`ADAPTER_PATH`
+    e liga `MAX_TOKENS` e `TEMPERATURE`, que estavam no `.env.example` sem nada consumindo
+    - `com_adapter=False` serve o baseline: `ADAPTER_PATH` tem default sempre presente, então
+      não existe valor de `.env` que produza o modelo base sem esta chave
   - `model_config = ConfigDict(protected_namespaces=())`: o Pydantic v2 reserva o prefixo
     `model_` e avisa a cada instanciação de um campo `model_path`
 
@@ -264,8 +268,11 @@ tech-challenge-group-24/
   - `sanitize_input(text)`:
     - Remove tentativas de prompt injection (padrões `ignore previous`, `you are now`, `jailbreak`)
     - Limita tamanho máximo de input (trunca em 2000 chars)
-    - Trunca **antes** de rodar as regex, e substitui por marcador em vez de apagar:
-      apagar cola as pontas e reconstrói a instrução que se queria eliminar
+    - Trunca **antes e depois** de rodar as regex. Antes, para uma entrada de dezenas de MB
+      não passar inteira pelo motor de regex; depois, porque o marcador é maior que o padrão
+      que substitui e a saída cresceria acima do teto (e a função deixaria de ser idempotente)
+    - Substitui por marcador em vez de apagar: apagar cola as pontas e reconstrói a instrução
+      que se queria eliminar
     - Regex sem quantificador aninhado — um `(\s+\w+)+` transformaria a sanitização num
       vetor de negação de serviço por backtracking
   - `check_prescription_attempt(text)`:
@@ -275,7 +282,9 @@ tech-challenge-group-24/
   - `validate_response(response)`:
     - Verifica se a resposta contém `[Fonte:` e `[Requer validação médica]`
     - Se não, adiciona footer padrão: `\n[Requer validação médica por profissional habilitado]`
-    - A marca é comparada por **prefixo**, senão uma variante da frase leva rodapé dobrado
+    - A marca é comparada por **prefixo**, senão uma variante da frase leva rodapé dobrado, e
+      só vale quando **fecha** o texto: o modelo pode citar a frase no meio da resposta, e
+      aceitá-la em qualquer posição deixaria a resposta sair sem marca nenhuma no fim
     - Fonte ausente é reportada, nunca preenchida: um `[Fonte:]` fabricado aqui destrói a
       explainability que o campo existe para dar
   - `apply_guardrails(query, response)`:
@@ -293,14 +302,19 @@ tech-challenge-group-24/
   - `test_validate_response_keeps_existing()` — não duplica disclaimer se já existe
   - `test_apply_guardrails_full_flow()` — fluxo completo com mock
   - `test_sanitize_neutraliza_sem_reconstruir_o_ataque()` — saída sem nenhum padrão residual
+  - `test_sanitize_respeita_o_limite_com_entrada_hostil()` — o teto vale mesmo quando a
+    substituição faz o texto crescer, e a função segue idempotente
+  - `test_validate_response_exige_a_marca_fechando_o_texto()` — a frase citada no meio da
+    resposta não conta como rodapé
   - `test_apply_guardrails_detecta_prescricao_so_na_resposta()` — posologia não solicitada
   - `test_apply_guardrails_nao_inventa_fonte()` — ausência reportada, não remendada
 
 - [x] `tests/test_llm_model.py` (não estava no plano; o wrapper também precisa de teste)
   - `mlx_lm` é substituído por módulo falso em `sys.modules`, não por `monkeypatch` sobre o
     pacote real: a suíte precisa rodar fora do Apple Silicon, onde o `mlx-lm` nem é instalado
-  - cobre chat template, `stop`, repasse de `temperature`/`max_tokens`, cache do modelo,
-    separação baseline vs fine-tuned e `from_env()`
+  - cobre chat template, `stop`, repasse de `temperature`/`max_tokens`, cache do modelo
+    (separação baseline vs fine-tuned e descarte ao passar do teto) e `from_env()` nas duas
+    pontas — com adapter e servindo o baseline
 
 **Dependências de outras PRs:** PR 01
 

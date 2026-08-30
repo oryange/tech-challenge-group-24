@@ -37,19 +37,31 @@ TEMPERATURE_PADRAO = 0.2
 # receberia os pesos da primeira e a comparação mediria nada.
 _MODELOS_CARREGADOS: dict[tuple[str, str | None, str | None], tuple[Any, Any]] = {}
 
+# Cada entrada do cache são alguns GB de pesos vivos na memória, e a chave é uma combinação
+# — não um modelo. Um processo que varre combinações (o notebook comparando revisões, uma
+# sessão que troca de adapter) acumularia todas até o processo morrer, e a máquina de
+# desenvolvimento tem 24 GB. Dois é o que o caso de uso pede: baseline e fine-tuned lado a
+# lado. O descarte é por menos usado recentemente, para que a alternância entre esses dois
+# não fique recarregando um a cada troca.
+_LIMITE_MODELOS_EM_CACHE = 2
+
 
 def _carregar(model_path: str, adapter_path: str | None, revision: str | None) -> tuple[Any, Any]:
     """Carrega modelo e tokenizer uma vez por combinação, reaproveitando nas seguintes."""
     chave = (model_path, adapter_path, revision)
-    if chave not in _MODELOS_CARREGADOS:
-        from mlx_lm import load
+    if chave in _MODELOS_CARREGADOS:
+        # Reinsere no fim: `dict` preserva a ordem de inserção, então o fim é o uso mais
+        # recente e o começo é o candidato natural ao descarte.
+        _MODELOS_CARREGADOS[chave] = _MODELOS_CARREGADOS.pop(chave)
+        return _MODELOS_CARREGADOS[chave]
 
-        _MODELOS_CARREGADOS[chave] = load(
-            model_path,
-            adapter_path=adapter_path,
-            revision=revision,
-        )
-    return _MODELOS_CARREGADOS[chave]
+    from mlx_lm import load
+
+    carregado = load(model_path, adapter_path=adapter_path, revision=revision)
+    while len(_MODELOS_CARREGADOS) >= _LIMITE_MODELOS_EM_CACHE:
+        _MODELOS_CARREGADOS.pop(next(iter(_MODELOS_CARREGADOS)))
+    _MODELOS_CARREGADOS[chave] = carregado
+    return carregado
 
 
 def _cortar_em_stop(texto: str, stop: list[str] | None) -> str:
@@ -72,7 +84,8 @@ class MedicalMLXLLM(LLM):
     """LLM do assistente médico: Llama-3.2-3B com os adapters LoRA do PR 04.
 
     `adapter_path=None` serve o modelo base sem fine-tuning — é o que a comparação
-    baseline vs fine-tuned do relatório técnico usa.
+    baseline vs fine-tuned do relatório técnico usa, e é o que `from_env(com_adapter=False)`
+    monta a partir do `.env`.
     """
 
     # O Pydantic v2 reserva o prefixo `model_` para uso interno e avisa a cada instanciação
@@ -88,12 +101,18 @@ class MedicalMLXLLM(LLM):
     revision: str | None = None
 
     @classmethod
-    def from_env(cls) -> "MedicalMLXLLM":
+    def from_env(cls, com_adapter: bool = True) -> "MedicalMLXLLM":
         """Constrói a instância a partir do `.env`.
 
         A resolução dos caminhos vem do `LoRAConfig` em vez de reler `os.getenv` aqui: ele já
         ancora caminho relativo na raiz do repositório e já resolve `~`, e duplicar essa
         lógica é como o treino e a inferência acabam apontando para adapters diferentes.
+
+        `com_adapter=False` serve o modelo base — é o outro lado da comparação baseline vs
+        fine-tuned do relatório técnico. O parâmetro existe porque `config.adapter_path` é um
+        `Path` com default sempre presente: não há valor de `.env` que produza `None`, então
+        sem esta chave o baseline seria inalcançável por aqui e, numa máquina sem adapters
+        treinados, `_call` só teria o `FileNotFoundError` a oferecer.
 
         `MAX_TOKENS` e `TEMPERATURE` estão no `.env.example` desde o PR 01 e até agora nada
         as consumia — mesmo caso do `BASE_MODEL` que o PR 04 ligou ao `LoRAConfig`.
@@ -103,7 +122,7 @@ class MedicalMLXLLM(LLM):
         config = LoRAConfig()
         return cls(
             model_path=config.model,
-            adapter_path=str(config.adapter_path),
+            adapter_path=str(config.adapter_path) if com_adapter else None,
             revision=config.revisao_efetiva,
             max_tokens=int(os.getenv("MAX_TOKENS") or MAX_TOKENS_PADRAO),
             temperature=float(os.getenv("TEMPERATURE") or TEMPERATURE_PADRAO),
