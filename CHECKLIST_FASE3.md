@@ -188,13 +188,14 @@ tech-challenge-group-24/
 
 ---
 
-### PR 04 — Fine-tuning com MLX-LM
+### PR 04 — Fine-tuning com MLX-LM ✅
 **Responsável:** Pessoa A  
-**Entrega:** adapters LoRA treinados + notebook com métricas
+**Entrega:** adapters LoRA treinados + notebook com métricas  
+**Branch:** `feat/pr04-fine-tuning` (mergeado no `main` pelo PR #4)
 
 > **Pré-requisito:** PR 02 mergeado e `data/processed/dataset.jsonl` gerado localmente
 
-- [ ] `src/fine_tuning/config.py`
+- [x] `src/fine_tuning/config.py`
   - Dataclass `LoRAConfig` com todos os hiperparâmetros:
     - `model = "meta-llama/Llama-3.2-3B-Instruct"`
     - `lora_layers = 8`, `lora_rank = 8`, `lora_alpha = 16.0`
@@ -202,10 +203,15 @@ tech-challenge-group-24/
     - `max_seq_length = 512`, `val_batches = 25`
   - Método `to_mlx_args()` que retorna lista de args para `mlx_lm.lora`
 
-- [ ] `src/fine_tuning/trainer.py`
+- [x] `src/fine_tuning/trainer.py`
   - Função `_prepare_mlx_data(dataset_path, output_dir)`:
     - Split 90/10 treino/validação
-    - Converte para formato de prompt MLX-LM: `<s>[INST] ... [/INST] ... </s>`
+    - ~~Converte para formato de prompt MLX-LM: `<s>[INST] ... [/INST] ... </s>`~~
+      Grava `{messages}` com os papéis user/assistant e deixa o MLX-LM aplicar o
+      `chat_template` do próprio modelo. Escrever `[INST]` à mão produziria o template do
+      Mistral, e o modelo aqui é o Llama-3.2 — o treino veria uma estrutura e a inferência
+      outra. O porquê está em `trainer.py`, e o `evaluator._build_prompt` e o
+      `model._aplicar_chat_template` do PR 05 seguem o mesmo formato de propósito.
     - Salva `data/processed/mlx/train.jsonl` e `valid.jsonl`
   - Função `train(config)`:
     - Chama `_prepare_mlx_data`
@@ -213,7 +219,7 @@ tech-challenge-group-24/
     - Salva adapters em `data/fine_tuned/adapters/`
   - Executável diretamente: `python -m src.fine_tuning.trainer`
 
-- [ ] `src/fine_tuning/evaluator.py`
+- [x] `src/fine_tuning/evaluator.py`
   - Função `evaluate(model_path, adapter_path, test_samples)`:
     - Gera respostas com `mlx_lm.generate`
     - Calcula ROUGE-L e BLEU-4 contra respostas de referência
@@ -221,8 +227,12 @@ tech-challenge-group-24/
   - Função `save_results(metrics, path)`:
     - Salva em `docs/evaluation_results.json`
   - Executável diretamente: `python -m src.fine_tuning.evaluator`
+  - Além do plano: `available_checkpoints`, `best_checkpoint` e `materialize_checkpoint`
+    escolhem o checkpoint pela validação em vez de assumir que o último é o melhor, e
+    `compare()` roda baseline vs fine-tuned no mesmo processo — que é o que o
+    `_MODELOS_CARREGADOS` do PR 05 tem de saber distinguir
 
-- [ ] `notebooks/02_fine_tuning.ipynb`
+- [x] `notebooks/02_fine_tuning.ipynb`
   - Célula 1: instala dependências, configura `LoRAConfig`
   - Célula 2: prepara dados MLX, exibe split treino/validação
   - Célula 3: executa fine-tuning (ou carrega resultados pré-computados)
@@ -336,9 +346,14 @@ tech-challenge-group-24/
     - leitura pula linha corrompida em vez de estourar: o caso real é o processo morrer no
       meio de uma escrita, e uma trilha que se recusa a abrir por causa disso perde as
       entradas íntegras junto com a quebrada
-  - Instância global `audit_logger` configurada via `.env` (fecha o `AUDIT_LOG_PATH`, que
-    era checado pelo `check_env` sem ninguém lê-lo — mesmo defeito que o PR 04 corrigiu no
-    `BASE_MODEL`)
+  - ~~Instância global `audit_logger`~~ → acessor `get_audit_logger()`, configurado via
+    `.env` (fecha o `AUDIT_LOG_PATH`, que era checado pelo `check_env` sem ninguém lê-lo —
+    mesmo defeito que o PR 04 corrigiu no `BASE_MODEL`)
+    - a instância construída no import lia o ambiente **antes** do `load_dotenv`, porque num
+      programa de linha de comando os imports acontecem antes de qualquer execução: o
+      `AUDIT_LOG_PATH` do `.env` era ignorado sem nada denunciar, e o PR 08 acabaria
+      gravando num arquivo diferente do que o assistente do PR 07 usa
+    - de quebra, o `mkdir` do construtor deixa de ser efeito colateral de import
 
 - [x] `tests/test_audit_logger.py`
   - `test_log_creates_file()` — cria arquivo JSONL se não existir
@@ -354,18 +369,26 @@ tech-challenge-group-24/
 
 ---
 
-### PR 07 — Assistente LangChain
+### PR 07 — Assistente LangChain ✅
 **Responsável:** Pessoa B  
-**Entrega:** pipeline LangChain completo e funcional
+**Entrega:** pipeline LangChain completo e funcional  
+**Branch:** `feat/pr07-assistente`
 
 > **Pré-requisito:** PRs 03, 05, 06 mergeados
 
-- [ ] `src/assistant/prompts.py`
+- [x] `src/assistant/prompts.py`
   - `SYSTEM_PROMPT`: define o papel do assistente, limites éticos, obrigatoriedade de citar fonte
   - `MEDICAL_TEMPLATE`: template com `{system}`, `{patient_context}`, `{history}`, `{question}`
   - Função `build_prompt(question, patient_context, history)` → string formatada
+  - Contexto e pergunta entram em blocos delimitados (`<contexto_do_paciente>`,
+    `<pergunta_do_medico>`) e o `SYSTEM_PROMPT` declara que o conteúdo deles é **dado, nunca
+    instrução** — é a proteção estrutural contra prompt injection que o `guardrails.py` do
+    PR 05 aponta como sendo a de verdade, em oposição à denylist de padrões conhecidos
+  - Tags em vez de cerca de crase: o fechamento precisa ser difícil de falsificar de dentro
+  - Sem paciente selecionado o bloco leva um aviso explícito em vez de ficar vazio — bloco
+    vazio faz o modelo preencher a lacuna sozinho, o oposto de citar fonte
 
-- [ ] `src/assistant/retriever.py`
+- [x] `src/assistant/retriever.py`
   - Classe `PatientRetriever`:
     - `__init__(db_path)`: conecta ao SQLite via SQLAlchemy
     - `get_patient_context(patient_id)`:
@@ -373,12 +396,30 @@ tech-challenge-group-24/
         **2 consultas mais recentes** (queixa, avaliação, conduta e data)
       - Formata como string para injetar no prompt, com a data de cada consulta visível —
         é o que permite ao assistente citar `[Fonte: consulta de DD/MM/AAAA]`
+      - Exames pendentes saem em bloco próprio e **afirmados**, inclusive o caso "nenhum". A
+        lista única com `status: done|pending` obrigava o modelo a deduzir a ausência de
+        pendência a partir de dois `done`, e observando as respostas ele não deduzia:
+        ignorava o bloco de exames e recitava o de protocolos. Um fato que precisa ser
+        inferido não é fato no contexto — tem de estar escrito. Medido: o acerto factual
+        passou de 0/3 para 3/3 nos pacientes conferidos na hora da mudança
       - Sem método novo de propósito: o histórico entra no contexto que o PR 07 já monta,
         evitando abrir superfície nova na interface do retriever
     - `get_pending_exams(patient_id)`: retorna lista de exames com `status=pending`
     - `get_protocols(condition)`: busca protocolos por condição clínica
+      - Comparação exata e insensível a caixa, não `LIKE '%...%'`: `%` e `_` são curingas, e
+        um termo vindo da interface casaria o catálogo inteiro dentro do prompt
+    - `listar_pacientes()` (não estava no plano): o `patient_id` é token gerado pelo seed, e
+      sem forma de descobrir quais existem a única saída era abrir o SQLite na mão — pedir um
+      identificador que o usuário não tem como conhecer é o mesmo que não pedir nada
+  - Todas as consultas passam pelo ORM, que vincula os valores como parâmetro — nenhuma
+    string de SQL montada por concatenação ou f-string
+  - `patient_id` validado por allowlist (`[PACIENTE_NNN]`) antes de chegar ao banco. Não é o
+    que impede SQL injection (o ORM já impede): serve para transformar identificador
+    malformado em erro claro, em vez de resultado vazio que na tela vira "paciente sem dados"
+  - Paciente inexistente levanta `PacienteNaoEncontrado` em vez de devolver contexto vazio —
+    responder sem contexto, mas parecendo que teve, é pior que falhar
 
-- [ ] `src/assistant/chain.py`
+- [x] `src/assistant/chain.py`
   - Classe `MedicalAssistant`:
     - `__init__(llm, retriever, audit_logger)`: composição dos três componentes
     - `ask(question, patient_id, session_id)`:
@@ -396,14 +437,70 @@ tech-challenge-group-24/
       - `LLMChain` e `ConversationBufferMemory` **não** existem mais no pacote principal do
         LangChain 1.x: foram para o `langchain-classic`. Não usar — o projeto fica preso à
         linha 0.3 e o pip rebaixa todo o ecossistema em volta
-  - Executável interativo: `python -m src.assistant.chain`
+      - ⚠️ **Desvio do plano, com medição:** a `RunnableWithMessageHistory` foi removida. O
+        `InMemoryChatMessageHistory` por `session_id` continua sendo o armazenamento, mas o
+        histórico é injetado como **texto** no slot `{history}` do `MEDICAL_TEMPLATE` (que o
+        próprio plano define como texto), não como turnos de mensagem.
+        Motivo medido, `[PACIENTE_005]`, similaridade entre a resposta da 1ª e da 2ª
+        pergunta, sendo elas completamente diferentes:
 
-- [ ] `tests/test_chain.py`
+        | Forma do histórico | temp=0.2 | temp=0.7 |
+        |---|---|---|
+        | turnos `AI:` (`MessagesPlaceholder`) | 100% | 100% |
+        | sem histórico (sessão nova) | 14% | 26% |
+        | texto no bloco de dado | 24% | 10% |
+
+        Com turno de assistente o modelo copiava literalmente a própria resposta anterior,
+        nas duas temperaturas. É o mesmo motivo pelo qual o PR 05 não manda papel `system`:
+        este modelo foi fine-tuned em pares soltos e nunca viu conversa multi-turno, então
+        um bloco `AI: <resposta>` é estrutura fora da distribuição dele e a continuação mais
+        provável é repeti-la. Bônus: a `RunnableWithMessageHistory` já estava deprecada, e
+        os 17 `LangChainDeprecationWarning` da suíte sumiram junto.
+      - Só os 3 últimos turnos entram, e a resposta anterior é cortada em 200 caracteres:
+        resposta longa realimentada volta a ancorar a repetição, em versão atenuada
+      - O contexto do paciente **não** entra no histórico: entraria de novo a cada turno e o
+        prompt cresceria de forma quadrática
+      - O rodapé do guardrail também não é realimentado: ensinar o modelo a escrevê-lo
+        sozinho faria a marca deixar de distinguir o que o guardrail garantiu do que o
+        modelo inventou
+      - O histórico é atributo de instância, não global de módulo — duas instâncias não
+        enxergam a conversa uma da outra e um teste não herda o histórico do anterior
+    - O passo 3 usa o aviso de prescrição como **reforço dentro do contexto**, antes da
+      inferência: quem pede posologia faz o modelo receber o limite junto do dado, em vez de
+      só levar o carimbo depois
+    - O passo 4 monta o prompt pelo `ChatPromptTemplate`, que consome as mesmas constantes de
+      bloco do `prompts.py`. O `build_prompt` continua sendo a forma string (notebook e
+      relatório técnico) — as duas partem dos mesmos marcadores para não divergirem
+    - Só a pergunta saneada e o recorte da resposta vão para a trilha do PR 06. O contexto
+      clínico fica de fora: já está no banco, e copiá-lo para um arquivo aberto no notebook e
+      gravado no vídeo espalharia dado de paciente sem responder nada a mais na auditoria
+  - Executável interativo: `python -m src.assistant.chain`
+    - O paciente é validado na entrada, não na primeira pergunta: validar só dentro do `ask`
+      fazia a interface reclamar depois de a pergunta já ter sido escrita, e descartá-la
+    - `?` lista os pacientes do banco; Ctrl-C encerra em qualquer um dos dois campos
+    - Passos numerados ("passo 1 de 2 — paciente") e erro específico para quem digita a
+      pergunta no campo do paciente: dizer só "não está no banco" faz a pessoa tentar outro
+      nome, quando o problema é ela estar no campo errado
+    - `--paciente` / `--pergunta` fazem uma pergunta só e encerram, e `--listar` lista os
+      pacientes sem carregar o modelo. O interativo é ruim para testar: obriga a esperar o
+      carregamento e redigitar tudo a cada rodada, e o resultado não dá para repetir nem
+      colar num relatório
+    - Silencia o ruído do `transformers` e do `huggingface_hub` só no modo interativo (a
+      variável tem de entrar no ambiente antes do import), e o aviso de depreciação só no
+      `main()` — na suíte ele continua visível, que é onde serve de lembrete
+
+- [x] `tests/test_chain.py`
   - `test_ask_returns_required_fields()` — resposta tem todos os campos
   - `test_ask_triggers_guardrail_on_prescription()` — prescrição direta é bloqueada
   - `test_ask_includes_patient_context()` — contexto do paciente aparece na resposta
   - `test_ask_logs_to_audit()` — audit logger é chamado com parâmetros corretos
   - Todos os testes com mock do LLM (sem chamar o modelo real)
+  - O falso LLM **herda de `LLM`** em vez de ser um `Mock()`: um mock solto aceitaria
+    qualquer coisa no operador `|` e o teste passaria mesmo com a chain montada errada
+  - Cobre ainda: pergunta saneada antes de entrar no prompt, posologia oferecida sem ninguém
+    pedir, histórico isolado entre sessões e entre instâncias, contexto não repetido a cada
+    turno, paciente inexistente não chega a chamar o modelo, e o contexto clínico não
+    aparecendo no `audit.jsonl`
 
 **Dependências de outras PRs:** PR 03, PR 05, PR 06
 
@@ -583,3 +680,64 @@ PR 01 (setup)
 | Guardrails e limites (nunca prescrever sem validação humana) | PR 05 + PR 08 |
 | Explainability (citação de fonte) | PR 05 + PR 07 |
 | Vídeo de até 15 minutos | PR 11 |
+
+---
+
+## Pendências abertas na integração do PR 07
+
+Medidas rodando o assistente completo contra o modelo fine-tuned real, não em teste com
+mock. Nenhuma delas é defeito do PR 07 — o prompt chega ao modelo correto e completo, o que
+dá para conferir trocando o LLM pelo `FakeLLM` de `tests/test_chain.py`.
+
+### P1 — `TEMPERATURE=0.2` derruba o acerto factual (config, PR 07)
+
+Perguntando "quais exames estão pendentes?" aos 8 primeiros pacientes e conferindo a resposta
+contra o `get_pending_exams` do banco, já com o bloco explícito de pendentes no contexto:
+
+| Cenário | Acerto factual | Repetição média |
+|---|---|---|
+| `temp=0.2` (atual) | 2/8 | 37% |
+| `temp=0.7` | 6/8 | 45% |
+
+- [ ] Trocar `TEMPERATURE=0.2` por `0.7` no `.env` e no `.env.example`. O `from_env()` do
+      PR 05 já lê a variável — é configuração, nenhuma linha de código.
+- [ ] **Não** adicionar `repetition_penalty`: mexeria no `src/llm/model.py`, que é do PR 05,
+      e a medição não sustentou o ganho.
+
+A troca é acerto por fluidez, e vale: uma resposta correta e repetitiva é revisável, uma
+resposta fluente e errada não. Uma medição anterior, feita antes do bloco explícito de
+pendentes e olhando **só** repetição, dava `temp=0.2` em 71-77% e `temp=0.7` em 19-26% — a
+conclusão é a mesma, o fundamento é este aqui.
+
+Ressalva de método: 8 pacientes, uma amostra cada, sem seed fixa. A variância por paciente é
+alta; o agregado entre cenários é o que se sustenta, o resultado de um paciente isolado não.
+O `[PACIENTE_002]` (o único sem nenhum exame pendente) erra nas duas temperaturas — afirmar
+uma ausência é o caso mais difícil e o que menos existe no treino.
+
+### P2 — O modelo recita protocolo em vez de responder a pergunta (dataset, PR 04)
+
+A temperatura não resolve isto. Perguntando "quais exames estão pendentes deste paciente?":
+
+- `[PACIENTE_002]`, que **não tem nenhum exame pendente**, recebe o protocolo de
+  gastroenterite recitado. O modelo nunca diz "nenhum pendente".
+- `[PACIENTE_005]`, que tem exatamente um (`hemoglobina glicada`), tem o exame citado como
+  conduta de protocolo, não como resposta. E junto vem alucinação: "meta de glicemia below
+  6.5 mmol/l" — palavra em inglês e unidade errada (hemoglobina glicada é em %).
+
+Composição do `data/processed/mlx/train.jsonl` (903 exemplos), que explica o padrão:
+
+| Medida | Valor |
+|---|---|
+| Exemplos em inglês (PubMedQA) | 808 (89%) |
+| Exemplos em português (sintéticos) | 95 (11%) |
+| Exemplos que respondem sobre **dados estruturados de um paciente** | 0 |
+| Exemplos cuja resposta cita `[Fonte:` | 91 (10%) |
+
+- [ ] Avaliar o desequilíbrio 89/11 entre PubMedQA e sintéticos em português
+- [ ] Gerar exemplos do formato que o assistente realmente usa: contexto estruturado de
+      paciente na entrada, resposta que lê **aquele** contexto — inclusive o caso "não há
+      nada pendente", que hoje não existe no treino
+- [ ] Só 10% dos exemplos citam fonte, mas o `SYSTEM_PROMPT` do PR 07 exige citação em toda
+      resposta. É o que produz citação improvisada e malformada (`[Fonte:CID A09]`,
+      `[Fonte: avaliação:E11]`) — a explainability é cobrada na inferência e quase não é
+      treinada
