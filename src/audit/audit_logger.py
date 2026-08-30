@@ -74,6 +74,16 @@ PREVIEW_CARACTERES = 200
 # dentro de poucas dezenas de caracteres.
 LIMITE_TEXTO_LIVRE = 2000
 
+# Quanto o teto pode recuar para não partir a última palavra. O corte de `LIMITE_TEXTO_LIVRE`
+# vem antes da anonimização, então um dado pessoal a cavaleiro dele perde a cauda, deixa de
+# casar com a regra correspondente e o pedaço da esquerda seria gravado em claro — mesma
+# armadilha que o `PREVIEW_CARACTERES` evita anonimizando antes de recortar, e que aqui não
+# dá para evitar pela ordem, porque o teto existe justamente para limitar o que chega às
+# regex. A saída é não cortar no meio de um token. A margem cobre com folga a maior forma que
+# as regras conhecem (CPF pontuado tem 14 caracteres) sem transformar o teto em sugestão:
+# além dela o corte é seco, e uma sequência de 64 caracteres sem espaço não é PII conhecida.
+MARGEM_TOKEN_PARTIDO = 64
+
 # Permissões do que é criado aqui. O arquivo guarda pergunta de médico em texto livre e um
 # recorte de resposta clínica; o padrão do umask (0644) o deixa legível por qualquer conta da
 # máquina, sem que nada no fluxo denuncie isso.
@@ -94,6 +104,23 @@ _PII_CONVERSA: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<!\d)\d{2}9\d{8}(?!\d)"), TOKEN_TELEFONE),
     (re.compile(r"(?<!\d)\d{10,11}(?!\d)"), TOKEN_PACIENTE_ID),
 )
+
+
+def _limitar_texto_livre(texto: str) -> str:
+    """Aplica `LIMITE_TEXTO_LIVRE` sem partir a última palavra.
+
+    Recuar até o espaço anterior é o que impede que um CPF ou telefone a cavaleiro do teto
+    chegue pela metade ao anonimizador — ver `MARGEM_TOKEN_PARTIDO`.
+    """
+    if len(texto) <= LIMITE_TEXTO_LIVRE:
+        return texto
+    cortado = texto[:LIMITE_TEXTO_LIVRE]
+    if texto[LIMITE_TEXTO_LIVRE].isspace():
+        return cortado
+    cauda = re.search(r"\S+$", cortado)
+    if cauda is not None and len(cauda.group()) <= MARGEM_TOKEN_PARTIDO:
+        return cortado[: cauda.start()]
+    return cortado
 
 
 def _anonimizar_conversa(texto: str) -> str:
@@ -161,8 +188,10 @@ class AuditLogger:
         `get_patient_logs` sem proteger dado nenhum.
 
         O teto de `LIMITE_TEXTO_LIVRE` é o único corte que vem **antes** da anonimização, e
-        não contradiz o parágrafo acima: ele é ordens de grandeza maior que o alcance das
-        âncoras, então nenhuma regra deixa de casar por causa dele.
+        por isso está sujeito à mesma armadilha do parágrafo acima. Ser ordens de grandeza
+        maior que o alcance das âncoras resolve o caso delas, mas não o do dado que cai
+        exatamente em cima do corte: `_limitar_texto_livre` recua até o espaço anterior para
+        que nenhum token chegue partido ao anonimizador.
 
         `tem_fonte` e `motivos` recebem o resto do `ResultadoGuardrails` do PR 05. Eles têm
         default e a assinatura do checklist continua valendo, mas sem eles a métrica de
@@ -177,9 +206,9 @@ class AuditLogger:
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "session_id": session_id,
             "patient_id": patient_id,
-            "query": _anonimizar_conversa((query or "")[:LIMITE_TEXTO_LIVRE]),
+            "query": _anonimizar_conversa(_limitar_texto_livre(query or "")),
             "response_preview": _anonimizar_conversa(
-                (response or "")[:LIMITE_TEXTO_LIVRE]
+                _limitar_texto_livre(response or "")
             )[:PREVIEW_CARACTERES],
             "source": source,
             "guardrail_triggered": guardrail_triggered,

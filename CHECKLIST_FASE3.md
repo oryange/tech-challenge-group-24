@@ -395,6 +395,11 @@ tech-challenge-group-24/
   - `test_get_session_logs_filters_correctly()` — filtra por session_id
   - `test_get_patient_logs_filters_correctly()` — filtra por patient_id
   - `test_log_anonimiza_antes_de_recortar()` — CPF a cavaleiro do corte não vaza
+  - `test_o_teto_nao_parte_pii_no_corte()` — a mesma armadilha um andar acima: o teto de
+    texto livre vem **antes** da anonimização, e cortar seco em cima de um CPF ou telefone
+    fazia o pedaço da esquerda ir em claro para o disco; parametrizado nas três formas
+  - `test_o_teto_continua_valendo_para_token_gigante()` — o recuo até o espaço anterior é
+    limitado pela `MARGEM_TOKEN_PARTIDO`, senão um texto sem espaço nenhum anularia o teto
   - `test_log_anonimiza_pii_da_pergunta()` — nome na pergunta vira `[PACIENTE]`
   - `test_log_anonimiza_telefone_sem_formatacao()` e `test_log_anonimiza_cpf_sem_pontuacao()`
     — as formas que quem digita no chat usa, e que as âncoras do PR 02 não pegam

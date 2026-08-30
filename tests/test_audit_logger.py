@@ -142,6 +142,37 @@ def test_log_limita_o_texto_livre_antes_de_anonimizar(logger):
     assert len(entrada["query"]) == LIMITE_TEXTO_LIVRE
 
 
+@pytest.mark.parametrize(
+    "pii",
+    [
+        "123.456.789-01",  # CPF pontuado
+        "12345678901",  # CPF como quem digita no chat
+        "11987654321",  # celular sem formatação
+    ],
+)
+def test_o_teto_nao_parte_pii_no_corte(logger, pii):
+    # Mesma armadilha do corte de 200, um andar acima: o teto de texto livre vem **antes** da
+    # anonimização, então um dado a cavaleiro dele perderia a cauda, deixaria de casar com a
+    # regra e o pedaço da esquerda iria em claro para o disco.
+    enchimento = "a" * (LIMITE_TEXTO_LIVRE - len(pii) + 3)
+    # Sete caracteres: cabe no que sobraria do dado à esquerda do corte em todas as formas
+    # testadas, então o teste falha de verdade se o pedaço chegar ao disco.
+    vazamento = pii[:7]
+
+    entrada = _log(logger, query=f"{enchimento} {pii} conforme cadastro.")
+
+    assert vazamento not in entrada["query"]
+    assert vazamento not in logger.log_path.read_text(encoding="utf-8")
+
+
+def test_o_teto_continua_valendo_para_token_gigante(logger):
+    # O recuo é limitado: uma sequência longa sem espaço não é PII conhecida, e deixar o
+    # recuo ilimitado transformaria o teto em sugestão — bastaria um texto sem espaço nenhum.
+    entrada = _log(logger, query="a" * (LIMITE_TEXTO_LIVRE * 3))
+
+    assert len(entrada["query"]) == LIMITE_TEXTO_LIVRE
+
+
 def test_log_com_texto_livre_ausente_nao_quebra(logger):
     entrada = _log(logger, query="", response="")
 
