@@ -234,41 +234,87 @@ tech-challenge-group-24/
 
 ---
 
-### PR 05 — LLM wrapper e guardrails
+### PR 05 — LLM wrapper e guardrails ✅
 **Responsável:** Pessoa B  
-**Entrega:** classe LLM compatível com LangChain + sistema de guardrails
+**Entrega:** classe LLM compatível com LangChain + sistema de guardrails  
+**Branch:** `feat/pr05-llm-guardrails`
 
-- [ ] `src/llm/model.py`
+- [x] `src/llm/model.py`
   - Classe `MedicalMLXLLM(LLM)` herdando de `langchain_core.language_models.llms.LLM`
     (LangChain 1.x — confirmar o caminho do import com
     `python -c "from langchain_core.language_models.llms import LLM; print('ok')"`
     antes de escrever o resto da classe)
   - `_llm_type = "medical-mlx"`
   - `_call(prompt, stop, run_manager)`: chama `mlx_lm.generate` com adapter carregado
+    - o `stop` é aplicado depois da geração (o `mlx_lm.generate` não recebe a lista), na
+      ocorrência mais à esquerda, para o contrato do LangChain valer
+    - aplica o `chat_template` do tokenizer, tudo no papel `user` — igual ao treino, pelo
+      mesmo motivo do `evaluator._build_prompt`
   - `_identifying_params`: expõe `model_path` e `adapter_path`
   - Carregamento lazy do modelo (singleton com cache)
+    - chave `(modelo, adapter, revisão)`: com o adapter fora da chave, a comparação
+      baseline vs fine-tuned do notebook recebe os mesmos pesos nas duas pontas
+    - teto de 2 combinações, descartando a menos usada recentemente: cada entrada são GB de
+      pesos vivos, e um cache sem limite acumula até a memória da máquina acabar
   - Parâmetros: `model_path`, `adapter_path`, `max_tokens=512`, `temperature=0.2`
+  - `from_env(com_adapter=True)`: reusa o `LoRAConfig` para resolver `BASE_MODEL`/`ADAPTER_PATH`
+    e liga `MAX_TOKENS` e `TEMPERATURE`, que estavam no `.env.example` sem nada consumindo
+    - `com_adapter=False` serve o baseline: `ADAPTER_PATH` tem default sempre presente, então
+      não existe valor de `.env` que produza o modelo base sem esta chave
+  - `model_config = ConfigDict(protected_namespaces=())`: o Pydantic v2 reserva o prefixo
+    `model_` e avisa a cada instanciação de um campo `model_path`
 
-- [ ] `src/llm/guardrails.py`
+- [x] `src/llm/guardrails.py`
   - `sanitize_input(text)`:
     - Remove tentativas de prompt injection (padrões `ignore previous`, `you are now`, `jailbreak`)
     - Limita tamanho máximo de input (trunca em 2000 chars)
+    - Trunca **antes e depois** de rodar as regex. Antes, para uma entrada de dezenas de MB
+      não passar inteira pelo motor de regex; depois, porque o marcador é maior que o padrão
+      que substitui e a saída cresceria acima do teto (e a função deixaria de ser idempotente)
+    - Substitui por marcador em vez de apagar: apagar cola as pontas e reconstrói a instrução
+      que se queria eliminar
+    - Regex sem quantificador aninhado — um `(\s+\w+)+` transformaria a sanitização num
+      vetor de negação de serviço por backtracking
   - `check_prescription_attempt(text)`:
     - Detecta intent de prescrição direta (palavras-chave: "prescrever", "receitar", "dose de", "administrar")
+    - Casa por radical (`prescr(ev|iç|ic|it)`), não por flexão listada uma a uma
     - Retorna `(bool, warning_message)`
   - `validate_response(response)`:
     - Verifica se a resposta contém `[Fonte:` e `[Requer validação médica]`
     - Se não, adiciona footer padrão: `\n[Requer validação médica por profissional habilitado]`
+    - A marca é comparada por **prefixo**, senão uma variante da frase leva rodapé dobrado, e
+      só vale quando **fecha** o texto: o modelo pode citar a frase no meio da resposta, e
+      aceitá-la em qualquer posição deixaria a resposta sair sem marca nenhuma no fim
+    - Fonte ausente é reportada, nunca preenchida: um `[Fonte:]` fabricado aqui destrói a
+      explainability que o campo existe para dar
   - `apply_guardrails(query, response)`:
     - Wrapper que aplica todas as checagens e retorna resposta segura
+    - Checa prescrição nos **dois** lados: a pergunta diz se pediram, a resposta diz se o
+      modelo entregou posologia sem que ninguém pedisse — o caso mais perigoso
+    - Devolve `ResultadoGuardrails(resposta, guardrail_triggered, tem_fonte, motivos)`,
+      que é o que o PR 07 retorna e o PR 06 registra
 
-- [ ] `tests/test_guardrails.py`
+- [x] `tests/test_guardrails.py`
   - `test_sanitize_removes_injection()` — prompt injection detectado e removido
   - `test_check_prescription_triggers()` — palavras de prescrição ativam o guardrail
   - `test_check_prescription_passes_question()` — pergunta normal não ativa guardrail
   - `test_validate_response_adds_disclaimer()` — disclaimer adicionado quando ausente
   - `test_validate_response_keeps_existing()` — não duplica disclaimer se já existe
   - `test_apply_guardrails_full_flow()` — fluxo completo com mock
+  - `test_sanitize_neutraliza_sem_reconstruir_o_ataque()` — saída sem nenhum padrão residual
+  - `test_sanitize_respeita_o_limite_com_entrada_hostil()` — o teto vale mesmo quando a
+    substituição faz o texto crescer, e a função segue idempotente
+  - `test_validate_response_exige_a_marca_fechando_o_texto()` — a frase citada no meio da
+    resposta não conta como rodapé
+  - `test_apply_guardrails_detecta_prescricao_so_na_resposta()` — posologia não solicitada
+  - `test_apply_guardrails_nao_inventa_fonte()` — ausência reportada, não remendada
+
+- [x] `tests/test_llm_model.py` (não estava no plano; o wrapper também precisa de teste)
+  - `mlx_lm` é substituído por módulo falso em `sys.modules`, não por `monkeypatch` sobre o
+    pacote real: a suíte precisa rodar fora do Apple Silicon, onde o `mlx-lm` nem é instalado
+  - cobre chat template, `stop`, repasse de `temperature`/`max_tokens`, cache do modelo
+    (separação baseline vs fine-tuned e descarte ao passar do teto) e `from_env()` nas duas
+    pontas — com adapter e servindo o baseline
 
 **Dependências de outras PRs:** PR 01
 
