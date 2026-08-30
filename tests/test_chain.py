@@ -13,6 +13,7 @@ o teste ficar rápido.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from langchain_core.language_models.llms import LLM
@@ -20,8 +21,11 @@ from langchain_core.language_models.llms import LLM
 from src.assistant.chain import (
     MedicalAssistant,
     _normalizar_escolha,
+    alergias_citadas,
     cortar_repeticao,
+    deduplicar_fontes,
     extrair_fonte,
+    fonte_confere,
     main,
 )
 from src.assistant.prompts import SEM_CONTEXTO, SYSTEM_PROMPT, build_prompt
@@ -227,6 +231,23 @@ def test_cortar_repeticao_pega_a_repeticao_com_erro_de_digitacao():
     assert cortar_repeticao(f"{frase} {torta}") == frase
 
 
+def test_cortar_repeticao_pega_frase_curta_repetida():
+    # O caso real que passava inteiro: "Solicitar espirometria." tem 22 caracteres, abaixo do
+    # piso de similaridade, e o modelo a repetiu 30 vezes numa resposta de verdade.
+    curta = "Solicitar espirometria."
+
+    cortado = cortar_repeticao(f"Conduta definida. {curta} " * 1 + f"{curta} " * 5)
+
+    assert cortado.count(curta) == 1
+
+
+def test_cortar_repeticao_preserva_frases_curtas_diferentes():
+    # Frase curta só é cortada por igualdade: estrutura curta e distinta continua inteira.
+    texto = "Conduta: manter. Achado esperado. Exame pendente."
+
+    assert cortar_repeticao(texto) == texto
+
+
 def test_cortar_repeticao_preserva_resposta_legitima():
     texto = (
         "O exame pendente é hemoglobina glicada. A última consulta registrou melhora "
@@ -316,9 +337,101 @@ def test_extrair_fonte_citacao_cortada_no_meio():
 def test_ask_returns_required_fields(assistente):
     resultado = assistente.ask("Quais exames estão pendentes?", patient_id=PACIENTE)
 
-    assert set(resultado) == {"response", "source", "guardrail_triggered", "patient_context_used"}
+    assert set(resultado) == {
+        "response",
+        "source",
+        "guardrail_triggered",
+        "patient_context_used",
+        "alergias_alertadas",
+    }
     assert resultado["source"] == "exames do paciente"
     assert resultado["patient_context_used"] is True
+
+
+def test_ask_alerta_alergia_mesmo_quando_o_modelo_ignora(assistente):
+    # O caso medido: o modelo responde sobre o protocolo da condição de base e não menciona a
+    # alergia. O alerta é do código, então não depende de a geração ter colaborado.
+    assistente.llm.resposta = "Para asma, manter broncodilatador. [Fonte: protocolo CID J45]"
+
+    resultado = assistente.ask("O paciente pode receber dipirona?", patient_id=PACIENTE)
+
+    assert resultado["alergias_alertadas"] == ["dipirona"]
+    assert resultado["response"].startswith("[ALERTA DE ALERGIA:")
+    assert "dipirona" in resultado["response"]
+
+
+def test_ask_alerta_alergia_entra_no_contexto_do_prompt(assistente):
+    assistente.ask("Posso prescrever dipirona?", patient_id=PACIENTE)
+
+    assert "ALERTA DE ALERGIA" in assistente.llm.prompts[0]
+
+
+def test_ask_sem_alergia_citada_nao_alerta(assistente):
+    resultado = assistente.ask("Quais exames estão pendentes?", patient_id=PACIENTE)
+
+    assert resultado["alergias_alertadas"] == []
+    assert "ALERTA DE ALERGIA" not in resultado["response"]
+
+
+def test_alergias_citadas_ignora_caixa_e_acento():
+    assert alergias_citadas("Pode dar DIPIRONA?", ["dipirona"]) == ["dipirona"]
+    assert alergias_citadas("e o contraste iodado?", ["contraste iodado"]) == [
+        "contraste iodado"
+    ]
+
+
+def test_alergias_citadas_nao_casa_por_substring():
+    # "sulfa" dentro de outra palavra não é menção à alergia; alerta que dispara sozinho
+    # deixa de ser lido.
+    assert alergias_citadas("Discutimos sulfassalazina ontem.", ["sulfa"]) == []
+
+
+def test_ask_descarta_fonte_que_nao_confere_com_o_contexto(assistente):
+    # Data que não existe no prontuário deste paciente: a citação tem cara de legítima e iria
+    # para a trilha como explainability boa.
+    assistente.llm.resposta = "Houve melhora. [Fonte: consulta de 09/09/1999]"
+
+    with pytest.warns(UserWarning, match="sem correspondência"):
+        resultado = assistente.ask("Como foi a última consulta?", patient_id=PACIENTE)
+
+    assert resultado["source"] is None
+
+
+def test_ask_mantem_fonte_que_confere(assistente):
+    contexto = assistente.retriever.get_patient_context(PACIENTE)["contexto"]
+    data = re.search(r"consulta de (\d{2}/\d{2}/\d{4})", contexto, re.IGNORECASE).group(1)
+    assistente.llm.resposta = f"Houve melhora. [Fonte: consulta de {data}]"
+
+    resultado = assistente.ask("Como foi a última consulta?", patient_id=PACIENTE)
+
+    assert resultado["source"] == f"consulta de {data}"
+
+
+def test_deduplicar_fontes_remove_a_citacao_repetida():
+    # Medido: o modelo abre com a citação e a repete no fim da mesma resposta de duas linhas.
+    texto = "[Fonte: exames do paciente] Hemograma pendente. [Fonte: exames do paciente]"
+
+    assert deduplicar_fontes(texto).count("[Fonte:") == 1
+
+
+def test_deduplicar_fontes_preserva_fontes_diferentes():
+    texto = "[Fonte: exames do paciente] Pendente. [Fonte: protocolo CID J45] Conduta."
+
+    assert deduplicar_fontes(texto).count("[Fonte:") == 2
+
+
+def test_deduplicar_fontes_lida_com_colchete_aninhado():
+    texto = "[Fonte: protocolo asma [CID J45]] Conduta. [Fonte: protocolo asma [CID J45]]"
+
+    deduplicado = deduplicar_fontes(texto)
+
+    assert deduplicado.count("[Fonte:") == 1
+    assert "[CID J45]" in deduplicado
+
+
+def test_fonte_generica_sem_identificador_passa():
+    # Não há data nem CID para conferir; barrar a forma genérica só faria o modelo citar menos.
+    assert fonte_confere("exames do paciente", "Exames PENDENTES: hemograma") is True
 
 
 def test_ask_includes_patient_context(assistente):

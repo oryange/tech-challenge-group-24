@@ -34,9 +34,14 @@ def mlx_falso(monkeypatch):
         registro["loads"].append((model_path, adapter_path, revision))
         return ("modelo-falso", _TokenizerFalso())
 
-    def generate(modelo, tokenizer, prompt, max_tokens, sampler, verbose):
+    def generate(modelo, tokenizer, prompt, max_tokens, sampler, logits_processors, verbose):
         registro["generates"].append(
-            {"prompt": prompt, "max_tokens": max_tokens, "sampler": sampler}
+            {
+                "prompt": prompt,
+                "max_tokens": max_tokens,
+                "sampler": sampler,
+                "logits_processors": logits_processors,
+            }
         )
         return "  Conduta sugerida.\n\nRodapé que o stop deve cortar.  "
 
@@ -46,6 +51,9 @@ def mlx_falso(monkeypatch):
 
     sample_utils = types.ModuleType("mlx_lm.sample_utils")
     sample_utils.make_sampler = lambda temp: f"sampler(temp={temp})"
+    sample_utils.make_logits_processors = (
+        lambda repetition_penalty: f"penalty({repetition_penalty})"
+    )
     mlx.sample_utils = sample_utils
 
     monkeypatch.setitem(sys.modules, "mlx_lm", mlx)
@@ -119,6 +127,23 @@ def test_call_repassa_temperature_e_max_tokens(mlx_falso):
     chamada = mlx_falso["generates"][0]
     assert chamada["max_tokens"] == 128
     assert chamada["sampler"] == "sampler(temp=0.7)"
+
+
+def test_call_aplica_a_penalidade_de_repeticao(mlx_falso):
+    # A correção de verdade da degeneração acontece na geração; o `cortar_repeticao` do PR 07
+    # é paliativo de exibição e não impede o modelo de gastar o `max_tokens` no loop.
+    _llm(repetition_penalty=1.2).invoke("Pergunta clínica.")
+
+    assert mlx_falso["generates"][0]["logits_processors"] == "penalty(1.2)"
+
+
+def test_identifying_params_inclui_a_penalidade(tmp_path):
+    # Faz parte da identidade da geração: sem isso, um cache do LangChain trataria duas
+    # penalidades diferentes como o mesmo LLM.
+    padrao = _llm()._identifying_params
+    outra = _llm(repetition_penalty=1.5)._identifying_params
+
+    assert padrao != outra
 
 
 def test_call_corta_na_sequencia_de_stop(mlx_falso):

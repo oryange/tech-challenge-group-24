@@ -47,6 +47,19 @@ MAX_TOKENS_PADRAO = 512
 # paciente isolado, não.
 TEMPERATURE_PADRAO = 0.7
 
+# Penalidade de repetição no sampler, a correção que o `cortar_repeticao` do PR 07 declara no
+# próprio docstring como sendo a de verdade — ele é paliativo de exibição e não impede o
+# modelo de gastar o `max_tokens` inteiro num loop. A medição do `TEMPERATURE_PADRAO` acima
+# registra 45% de repetição média em 0.7; é esse número que este parâmetro ataca, na geração e
+# não na apresentação.
+#
+# 1.1 é conservador de propósito. A penalidade age sobre tokens já emitidos, e texto clínico
+# repete termo legitimamente ("espirometria" aparece na conduta e no exame pendente): valor
+# alto empurraria o modelo a trocar o termo correto por sinônimo, que num apoio à decisão é
+# pior que a repetição. `repetition_context_size=20` é o padrão do mlx-lm — janela curta o
+# bastante para pegar o loop imediato sem penalizar um termo retomado parágrafos depois.
+REPETITION_PENALTY_PADRAO = 1.1
+
 # Chave: (modelo, adapter, revisão). Valor: (modelo carregado, tokenizer).
 #
 # Carregar o Llama-3.2-3B custa dezenas de segundos e alguns GB de RAM, e o `_call` roda uma
@@ -117,6 +130,7 @@ class MedicalMLXLLM(LLM):
     adapter_path: str | None = None
     max_tokens: int = MAX_TOKENS_PADRAO
     temperature: float = TEMPERATURE_PADRAO
+    repetition_penalty: float = REPETITION_PENALTY_PADRAO
     revision: str | None = None
 
     @classmethod
@@ -145,6 +159,9 @@ class MedicalMLXLLM(LLM):
             revision=config.revisao_efetiva,
             max_tokens=int(os.getenv("MAX_TOKENS") or MAX_TOKENS_PADRAO),
             temperature=float(os.getenv("TEMPERATURE") or TEMPERATURE_PADRAO),
+            repetition_penalty=float(
+                os.getenv("REPETITION_PENALTY") or REPETITION_PENALTY_PADRAO
+            ),
         )
 
     @property
@@ -164,6 +181,7 @@ class MedicalMLXLLM(LLM):
             "revision": self.revision,
             "max_tokens": self.max_tokens,
             "temperature": self.temperature,
+            "repetition_penalty": self.repetition_penalty,
         }
 
     def _aplicar_chat_template(self, tokenizer: Any, prompt: str) -> str:
@@ -221,7 +239,7 @@ class MedicalMLXLLM(LLM):
         self._conferir_adapter()
 
         from mlx_lm import generate
-        from mlx_lm.sample_utils import make_sampler
+        from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
         modelo, tokenizer = _carregar(self.model_path, self.adapter_path, self.revision)
         resposta = generate(
@@ -230,6 +248,9 @@ class MedicalMLXLLM(LLM):
             self._aplicar_chat_template(tokenizer, prompt),
             max_tokens=self.max_tokens,
             sampler=make_sampler(temp=self.temperature),
+            logits_processors=make_logits_processors(
+                repetition_penalty=self.repetition_penalty
+            ),
             verbose=False,
         )
         return _cortar_em_stop(resposta.strip(), stop)

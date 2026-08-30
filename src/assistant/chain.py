@@ -48,6 +48,7 @@ if __name__ == "__main__":  # pragma: no cover
 
 import difflib
 import re
+import unicodedata
 import warnings
 from pathlib import Path
 from typing import Any
@@ -79,8 +80,22 @@ RESUMO_DA_RESPOSTA = 200
 
 _ABERTURA_FONTE = re.compile(r"\[Fonte:\s*", re.IGNORECASE)
 
-# Corte da resposta quando o modelo entra em loop. Frases curtas ficam de fora porque
-# "Conduta:" ou "Achado esperado." repetidos não são degeneração, são estrutura.
+# A citação inteira, com um nível de aninhamento: o modelo escreve `[Fonte: protocolo asma
+# [CID J45]]` e `[Fonte: exames do [PACIENTE_001]]`, e um `[^\]]*` pararia no colchete de
+# dentro — mesma armadilha que o `extrair_fonte` evita contando profundidade. Um nível basta
+# porque é o que as formas citáveis produzem; o que passar disso simplesmente não é
+# deduplicado, que é o lado seguro de errar aqui.
+_TAG_DE_FONTE = re.compile(
+    r"\[Fonte:[^\[\]]*(?:\[[^\[\]]*\][^\[\]]*)*\]",
+    re.IGNORECASE,
+)
+
+# Corte da resposta quando o modelo entra em loop. Frases curtas não são comparadas por
+# similaridade porque "Conduta:" ou "Achado esperado." parecidos não são degeneração, são
+# estrutura — mas *idênticas* elas são, e ficar de fora da comparação inteira era um buraco:
+# "Solicitar espirometria." tem 22 caracteres, nunca chegava a `comparaveis` e o modelo
+# repetiu a frase 30 vezes numa resposta real, com o corte instalado e sem efeito. Por isso a
+# regra é dupla: acima do piso vale semelhança, abaixo dele vale igualdade exata.
 #
 # O separador é capturado (e não descartado) porque ele carrega a formatação: a resposta vem
 # com item de lista em linha própria, e um `split` que engole o `\n` seguido de `" ".join`
@@ -88,6 +103,66 @@ _ABERTURA_FONTE = re.compile(r"\[Fonte:\s*", re.IGNORECASE)
 _FIM_DE_FRASE = re.compile(r"((?<=[.!?])\s+)")
 FRASE_MINIMA = 25
 SIMILARIDADE_DE_REPETICAO = 0.9
+
+# Alerta de alergia. Vem do banco e é imposto pelo código, não pedido ao modelo, pela mesma
+# razão que o rodapé de validação do PR 05 é imposto: medido com o assistente completo, a
+# pergunta "o paciente pode receber dipirona?" para o [PACIENTE_001] — que tem dipirona
+# registrada como alergia — não mencionou a alergia em 4 de 4 tentativas. O modelo respondia
+# sobre o protocolo da condição de base e ignorava a pergunta. Um alerta que só aparece quando
+# a geração colabora não é alerta, e este é o caso em que errar machuca o paciente.
+#
+# O alerta abre a resposta em vez de fechá-la: o rodapé de validação já ocupa o fim, e uma
+# contraindicação que aparece depois de três parágrafos de protocolo é lida por último, ou não
+# é lida. É afirmação sobre o prontuário, não conduta — não substitui a avaliação de quem
+# prescreve, e por isso o rodapé de validação continua vindo depois.
+ALERTA_ALERGIA = (
+    "[ALERTA DE ALERGIA: o prontuário deste paciente registra alergia a {alergias}. "
+    "Confira a contraindicação antes de qualquer conduta.]"
+)
+
+# Só letras e dígitos separam os termos: a comparação é feita sobre a forma normalizada, então
+# "Dipirona," e "dipirona" viram o mesmo token e a pontuação da pergunta não atrapalha.
+_TERMOS = re.compile(r"[^\W_]+", re.UNICODE)
+
+# O que numa fonte é conferível contra o contexto: data (`01/08/2026`) e código CID (`J45`,
+# `J45.0`). São os dois formatos que o `SYSTEM_PROMPT` manda o modelo citar e os dois que ele
+# consegue inventar com aparência de legítimos — o resto da citação é prosa, que não dá para
+# conferir por comparação literal sem barrar paráfrase correta.
+_IDENTIFICADOR_DE_FONTE = re.compile(r"\d{2}/\d{2}/\d{4}|\b[A-Z]\d{2}(?:\.\d+)?\b")
+
+
+def _normalizar(texto: str) -> str:
+    """Minúsculas e sem acento, para comparar termo de alergia com o que o médico digitou.
+
+    Sem isto, "Dipirona" na pergunta e "dipirona" no prontuário não casam, e o alerta deixaria
+    de sair justamente por diferença de caixa — falha silenciosa e do lado errado.
+    """
+    decomposto = unicodedata.normalize("NFKD", texto.lower())
+    return "".join(caractere for caractere in decomposto if not unicodedata.combining(caractere))
+
+
+def alergias_citadas(pergunta: str, alergias: list[str]) -> list[str]:
+    """Alergias do prontuário mencionadas na pergunta, na grafia original do prontuário.
+
+    A comparação é por termo inteiro e não por substring: "sulfa" como substring casaria
+    dentro de "sulfametoxazol" — o que aqui até seria desejável — mas também dentro de
+    palavras sem relação, e um alerta que dispara sozinho é ignorado depois da terceira vez.
+    Alergia registrada com mais de uma palavra ("contraste iodado") casa quando todos os
+    termos dela aparecem na pergunta.
+
+    O alcance é o que o prontuário registra, literalmente: esta função **não** sabe que
+    "novalgina" é dipirona nem que um paciente alérgico a penicilina pode reagir a
+    cefalosporina. Cobrir isso exigiria uma base de sinônimos e de reatividade cruzada que o
+    projeto não tem, e afirmar a garantia maior seria pior do que declarar esta — mesma razão
+    pela qual o `audit_logger` declara que não cobre nome sem âncora.
+    """
+    na_pergunta = set(_TERMOS.findall(_normalizar(pergunta)))
+    citadas = []
+    for alergia in alergias:
+        termos = set(_TERMOS.findall(_normalizar(alergia)))
+        if termos and termos <= na_pergunta:
+            citadas.append(alergia)
+    return citadas
 
 
 def cortar_repeticao(texto: str) -> str:
@@ -105,6 +180,10 @@ def cortar_repeticao(texto: str) -> str:
     repetições vêm com erro de digitação ("hemoglobria" no lugar de "hemoglobina"), e
     igualdade exata deixaria passar exatamente as piores.
 
+    Frase curta não entra na comparação por similaridade — duas frases de estrutura curtas se
+    parecem por acaso —, mas entra na comparação por igualdade: repetir "Solicitar
+    espirometria." trinta vezes é loop com qualquer tamanho de frase.
+
     O espaçamento original entre as frases mantidas é preservado: o corte tira o trecho
     repetido e nada mais, então uma resposta em lista continua em lista.
     """
@@ -113,17 +192,25 @@ def cortar_repeticao(texto: str) -> str:
     partes = _FIM_DE_FRASE.split(texto or "")
     mantidas: list[str] = []
     comparaveis: list[str] = []
+    vistas: set[str] = set()
     for indice in range(0, len(partes), 2):
         frase = partes[indice]
         chave = " ".join(frase.lower().split())
-        if len(chave) >= FRASE_MINIMA and any(
-            difflib.SequenceMatcher(None, chave, vista).ratio() >= SIMILARIDADE_DE_REPETICAO
-            for vista in comparaveis
-        ):
+        repetida = chave in vistas or (
+            len(chave) >= FRASE_MINIMA
+            and any(
+                difflib.SequenceMatcher(None, chave, vista).ratio()
+                >= SIMILARIDADE_DE_REPETICAO
+                for vista in comparaveis
+            )
+        )
+        if chave and repetida:
             break
         if indice:
             mantidas.append(partes[indice - 1])
         mantidas.append(frase)
+        if chave:
+            vistas.add(chave)
         if len(chave) >= FRASE_MINIMA:
             comparaveis.append(chave)
     return "".join(mantidas).strip()
@@ -161,6 +248,57 @@ def extrair_fonte(resposta: str) -> str | None:
     # Colchete nunca fechado: o modelo cortou no meio da citação, provavelmente no limite de
     # `max_tokens`. Uma fonte pela metade não é rastreável, então vale como ausência.
     return None
+
+
+def deduplicar_fontes(resposta: str) -> str:
+    """Mantém só a primeira ocorrência de cada citação `[Fonte: ...]` repetida.
+
+    O modelo abre a resposta com a citação e a repete no fim, às vezes duas vezes seguidas —
+    medido no assistente completo, três tags na mesma resposta de duas linhas. É ruído de
+    apresentação: a informação é a mesma, e o médico lê a segunda tag como se apontasse para
+    outra origem.
+
+    Só a **repetição literal** é removida. Duas fontes diferentes na mesma resposta ficam as
+    duas: elas podem estar cobrindo afirmações diferentes, e escolher uma seria decidir por
+    conta própria de onde veio o quê.
+    """
+    vistas: set[str] = set()
+
+    def manter(casamento: re.Match[str]) -> str:
+        chave = _normalizar(casamento.group(0))
+        if chave in vistas:
+            return ""
+        vistas.add(chave)
+        return casamento.group(0)
+
+    return _TAG_DE_FONTE.sub(manter, resposta or "").strip()
+
+
+def fonte_confere(fonte: str | None, contexto: str | None) -> bool:
+    """Diz se a fonte citada corresponde a algo que estava mesmo no contexto entregue.
+
+    Existe porque a fonte vai para a trilha de auditoria e é o que o relatório mede como
+    explainability: uma data ou um CID inventados pelo modelo entram no log com a mesma cara
+    de uma citação legítima, e é a auditoria — que confere depois, sem o prompt em mãos — que
+    fica sem como distinguir.
+
+    A verificação é sobre os **identificadores** da citação (datas e códigos CID), não sobre a
+    prosa: "consulta de 01/08/2026" confere se `01/08/2026` está no contexto. Termo genérico
+    como "exames do paciente" não tem identificador e passa — não há o que conferir, e barrar
+    a forma genérica só empurraria o modelo a citar menos.
+
+    O que isto **não** faz, e importa não confundir: confere que a fonte *existe*, não que a
+    afirmação saiu dela. Uma resposta que cita uma consulta real e atribui a ela um conteúdo
+    que não estava lá continua passando. Verificar isso é atribuição de conteúdo à fonte, um
+    problema de outra ordem — aqui se fecha só a citação fabricada.
+    """
+    if not fonte:
+        return False
+    identificadores = _IDENTIFICADOR_DE_FONTE.findall(fonte)
+    if not identificadores:
+        return True
+    alvo = _normalizar(contexto or "")
+    return all(_normalizar(identificador) in alvo for identificador in identificadores)
 
 
 class MedicalAssistant:
@@ -276,12 +414,25 @@ class MedicalAssistant:
         pergunta = sanitize_input(question)
 
         contexto = None
+        alergias_na_pergunta: list[str] = []
         if patient_id:
-            contexto = self.retriever.get_patient_context(patient_id)["contexto"]
+            dados = self.retriever.get_patient_context(patient_id)
+            contexto = dados["contexto"]
+            alergias_na_pergunta = alergias_citadas(pergunta, dados["alergias"])
 
         pediu_prescricao, aviso = check_prescription_attempt(pergunta)
         if pediu_prescricao:
             contexto = f"{contexto or SEM_CONTEXTO}\n\n{aviso}"
+
+        # Reforço no contexto **e** carimbo na resposta, adiante. Os dois, e não um dos dois:
+        # o reforço dá ao modelo a chance de responder a pergunta certa (é o que o aviso de
+        # prescrição faz no passo acima), e o carimbo é o que garante o alerta quando ele não
+        # aproveita a chance — que foi o comportamento medido.
+        if alergias_na_pergunta:
+            contexto = "{}\n\n{}".format(
+                contexto or SEM_CONTEXTO,
+                ALERTA_ALERGIA.format(alergias=", ".join(alergias_na_pergunta)),
+            )
 
         historico = self._historico_da_sessao(session_id)
 
@@ -308,8 +459,28 @@ class MedicalAssistant:
 
         # O corte vem antes do guardrail: o rodapé de validação tem de ficar no fim do
         # texto que o médico lê, não enterrado no meio do trecho repetido.
-        resultado = apply_guardrails(pergunta, cortar_repeticao(bruta))
-        fonte = extrair_fonte(resultado.resposta)
+        resultado = apply_guardrails(pergunta, deduplicar_fontes(cortar_repeticao(bruta)))
+
+        # O carimbo é aplicado depois do guardrail e no topo do texto — ver `ALERTA_ALERGIA`.
+        # Se o modelo já mencionou a alergia por conta própria, o carimbo continua vindo: o
+        # médico precisa saber qual alerta veio do prontuário e qual veio da geração, e
+        # suprimir o determinístico por semelhança devolveria a garantia ao modelo.
+        resposta = resultado.resposta
+        if alergias_na_pergunta:
+            alerta = ALERTA_ALERGIA.format(alergias=", ".join(alergias_na_pergunta))
+            resposta = f"{alerta}\n\n{resposta}"
+
+        fonte = extrair_fonte(resposta)
+        # Fonte citada que não corresponde ao contexto não vai para a trilha como se fosse
+        # boa: ela é registrada como ausente, que é a conclusão correta para quem audita.
+        fonte_valida = fonte_confere(fonte, contexto)
+        if fonte and not fonte_valida:
+            warnings.warn(
+                f"Fonte citada sem correspondência no contexto do paciente: {fonte!r}. "
+                "Registrada na trilha como ausente.",
+                stacklevel=2,
+            )
+            fonte = None
 
         # Só a pergunta e o recorte da resposta vão para a trilha, ambos anonimizados pelo
         # PR 06. O contexto do paciente fica de fora de propósito: ele já está no banco, e
@@ -317,18 +488,21 @@ class MedicalAssistant:
         # espalharia dado clínico sem responder nenhuma pergunta de auditoria a mais.
         self.audit_logger.log(
             query=pergunta,
-            response=resultado.resposta,
+            response=resposta,
             patient_id=patient_id,
             source=fonte,
             guardrail_triggered=resultado.guardrail_triggered,
             session_id=session_id,
+            tem_fonte=fonte is not None,
+            motivos=resultado.motivos,
         )
 
         return {
-            "response": resultado.resposta,
+            "response": resposta,
             "source": fonte,
             "guardrail_triggered": resultado.guardrail_triggered,
             "patient_context_used": bool(patient_id),
+            "alergias_alertadas": alergias_na_pergunta,
         }
 
 
