@@ -708,8 +708,13 @@ contra o `get_pending_exams` do banco, já com o bloco explícito de pendentes n
 | `temp=0.2` (atual) | 2/8 | 37% |
 | `temp=0.7` | 6/8 | 45% |
 
+- [x] `TEMPERATURE_PADRAO` em `src/llm/model.py` passou de `0.2` para `0.7`. A leitura
+      original — "é configuração, nenhuma linha de código" — estava incompleta: o padrão
+      embutido é o que vale para quem clona o repositório sem definir a variável, e deixá-lo
+      em `0.2` faria o valor recomendado e o comportamento de fábrica discordarem.
 - [ ] Trocar `TEMPERATURE=0.2` por `0.7` no `.env` e no `.env.example`. O `from_env()` do
-      PR 05 já lê a variável — é configuração, nenhuma linha de código.
+      PR 05 já lê a variável, e enquanto ela estiver definida em `0.2` ela **vence** o padrão
+      acima — essa é a metade que ainda falta.
 - [ ] **Não** adicionar `repetition_penalty`: mexeria no `src/llm/model.py`, que é do PR 05,
       e a medição não sustentou o ganho.
 

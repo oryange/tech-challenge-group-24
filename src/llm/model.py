@@ -26,7 +26,26 @@ from langchain_core.language_models.llms import LLM
 from pydantic import ConfigDict
 
 MAX_TOKENS_PADRAO = 512
-TEMPERATURE_PADRAO = 0.2
+
+# 0.7, e não os 0.2 do plano original. Medido com o assistente completo do PR 07, perguntando
+# "quais exames estão pendentes?" aos 8 primeiros pacientes e conferindo a resposta contra o
+# `get_pending_exams` do banco:
+#
+#     temp=0.2 -> 2/8 de acerto factual, 37% de repetição média
+#     temp=0.7 -> 6/8 de acerto factual, 45% de repetição média
+#
+# A troca é acerto por fluidez, e vale: uma resposta correta e repetitiva é revisável, uma
+# resposta fluente e errada não. O `cortar_repeticao` do PR 07 já atenua o lado que piora.
+#
+# Fica aqui, e não só no `.env`, porque este é o valor que vale para quem clona o repositório
+# sem definir a variável — deixar o padrão em 0.2 faria a configuração recomendada e o
+# comportamento de fábrica discordarem, que é o tipo de diferença que ninguém procura quando
+# o resultado sai pior que o do relatório.
+#
+# Ressalva de método, a mesma registrada no `CHECKLIST_FASE3.md`: 8 pacientes, uma amostra
+# cada, sem seed fixa. O agregado entre cenários é o que se sustenta; o resultado de um
+# paciente isolado, não.
+TEMPERATURE_PADRAO = 0.7
 
 # Chave: (modelo, adapter, revisão). Valor: (modelo carregado, tokenizer).
 #
