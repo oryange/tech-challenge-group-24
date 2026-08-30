@@ -82,6 +82,37 @@ def test_call_aplica_o_chat_template_do_modelo(mlx_falso):
     assert "Qual a conduta na crise asmática?" in prompt
 
 
+def test_preload_carrega_antes_da_primeira_geracao(mlx_falso):
+    llm = _llm()
+
+    llm.preload()
+
+    assert len(mlx_falso["loads"]) == 1
+    # Carregou sem gerar nada: é só a espera saindo da primeira pergunta.
+    assert mlx_falso["generates"] == []
+
+
+def test_preload_nao_faz_a_geracao_seguinte_recarregar(mlx_falso):
+    llm = _llm()
+
+    llm.preload()
+    llm.invoke("Pergunta clínica.")
+
+    # Mesmo cache do `_call`: adiantar o carregamento não o duplica.
+    assert len(mlx_falso["loads"]) == 1
+
+
+def test_preload_falha_com_a_mesma_mensagem_do_call(mlx_falso, tmp_path):
+    # O erro precisa ser o que ensina a rodar o trainer, e não um KeyError lá de dentro do
+    # MLX — e agora ele aparece no banner de carregamento, não no meio da primeira pergunta.
+    llm = _llm(adapter_path=str(tmp_path / "nao-existe"))
+
+    with pytest.raises(FileNotFoundError, match="src.fine_tuning.trainer"):
+        llm.preload()
+
+    assert mlx_falso["loads"] == []
+
+
 def test_call_repassa_temperature_e_max_tokens(mlx_falso):
     _llm(max_tokens=128, temperature=0.7).invoke("Pergunta clínica.")
 

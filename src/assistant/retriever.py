@@ -76,6 +76,18 @@ class PatientRetriever:
         Mesma resolução do `src.database.seed`: caminho relativo é ancorado na raiz do
         repositório, senão o banco encontrado mudaria conforme o diretório de onde o comando
         foi disparado — e o assistente leria um banco diferente do que o seed populou.
+
+        A igualdade com o seed é a regra, e ela vale inclusive onde a resolução é incompleta:
+        falta `expanduser()`, então `DB_PATH=~/hospital.db` cria um diretório chamado `~`
+        dentro do repositório. Consertar só aqui deixaria o assistente lendo o home de verdade
+        enquanto o seed continua populando o `~` literal — dois bancos diferentes, e a falha
+        aparecendo como "paciente sem dados". A correção tem de sair nos dois ao mesmo tempo,
+        no arquivo do PR 03; está anotada como pendência no `CHECKLIST_FASE3.md`.
+
+        O que **não** se faz aqui é exigir que o caminho fique contido na raiz, mesma decisão
+        e mesmo motivo do `config._do_ambiente`: apontar o banco para um disco externo é o
+        motivo de a variável existir, e quem escreve o `.env` é quem roda o comando — não há
+        fronteira de privilégio para o containment defender.
         """
         caminho = Path(os.getenv("DB_PATH") or DB_PATH_PADRAO)
         if not caminho.is_absolute():

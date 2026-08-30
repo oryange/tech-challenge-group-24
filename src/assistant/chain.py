@@ -190,6 +190,17 @@ class MedicalAssistant:
             audit_logger=AuditLogger.from_env(),
         )
 
+    def preload(self) -> None:
+        """Adianta o carregamento do modelo, quando o LLM souber fazê-lo.
+
+        Opcional de propósito: a chain funciona com qualquer `LLM` do LangChain, e a maioria
+        (inclusive o falso da suíte de testes) não tem o que pré-carregar. Quem sabe, sabe —
+        o porquê está no `MedicalMLXLLM.preload`.
+        """
+        carregar = getattr(self.llm, "preload", None)
+        if callable(carregar):
+            carregar()
+
     def _historico_da_sessao(self, session_id: str) -> BaseChatMessageHistory:
         return self._historicos.setdefault(session_id, InMemoryChatMessageHistory())
 
@@ -419,7 +430,7 @@ def main(argv: list[str] | None = None) -> None:
         prog="python -m src.assistant.chain",
         description="Assistente clínico. Sem argumentos, entra no modo interativo.",
     )
-    parser.add_argument("--paciente", help="identificador, ex.: [PACIENTE_007]")
+    parser.add_argument("--paciente", help="identificador: 7, 007 ou [PACIENTE_007]")
     parser.add_argument("--pergunta", help="faz uma pergunta só e encerra, sem modo interativo")
     parser.add_argument("--listar", action="store_true", help="lista os pacientes e encerra")
     args = parser.parse_args(argv)
@@ -436,8 +447,14 @@ def main(argv: list[str] | None = None) -> None:
             print(nome)
         return
 
-    print("Carregando modelo e adapters (pode levar alguns segundos)...")
+    # `flush` porque o que vem depois demora: sem ele, a linha fica presa no buffer e a tela
+    # passa a espera inteira em branco — exatamente o contrário do que a mensagem serve.
+    print("Carregando modelo e adapters (pode levar alguns segundos)...", flush=True)
     assistente = MedicalAssistant.from_env()
+    # Aqui, e não na primeira pergunta: a mensagem acima promete que o carregamento está
+    # acontecendo agora. Sem isto ela é falsa — o prompt volta na hora e a espera cai dentro
+    # da primeira pergunta, junto com o que o MLX imprime ao inicializar.
+    assistente.preload()
 
     # Caminho relativo à raiz, como o resto do projeto faz no que é exibido: o absoluto
     # ocupa duas linhas largas na tela e cola o resultado à máquina de quem rodou.
@@ -450,14 +467,27 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Banco:  {_curto(assistente.retriever.db_path)}")
     print(f"Trilha: {_curto(assistente.audit_logger.log_path)}")
 
+    # O `--paciente` passa pela mesma normalização do modo interativo. Sem isto, `--paciente 7`
+    # — a forma que o `--listar` e o passo 1 ensinam a usar — chegava cru ao retriever e batia
+    # na allowlist, com uma mensagem pedindo o token completo. Duas formas de dizer o mesmo
+    # paciente na mesma interface, uma delas recusada, é defeito da interface e não do usuário.
+    paciente = args.paciente
+    if paciente:
+        paciente = _normalizar_escolha(paciente, assistente.retriever.listar_pacientes())
+        if paciente is None:
+            raise SystemExit(
+                f"\n'{args.paciente}' não está no banco. Use --listar para ver os "
+                "identificadores disponíveis."
+            )
+
     if args.pergunta:
         try:
-            _imprimir(assistente.ask(args.pergunta, patient_id=args.paciente))
+            _imprimir(assistente.ask(args.pergunta, patient_id=paciente))
         except (PacienteNaoEncontrado, ValueError) as erro:
             raise SystemExit(f"\n{erro}")
         return
 
-    paciente = args.paciente or _escolher_paciente(assistente.retriever)
+    paciente = paciente or _escolher_paciente(assistente.retriever)
     if paciente is _CANCELADO:
         return
 

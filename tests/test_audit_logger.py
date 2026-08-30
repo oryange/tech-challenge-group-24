@@ -7,7 +7,13 @@ import json
 import pytest
 
 import src.audit.audit_logger as audit_logger_module
-from src.audit.audit_logger import PREVIEW_CARACTERES, AuditLogger
+from src.audit.audit_logger import (
+    LIMITE_TEXTO_LIVRE,
+    MODO_ARQUIVO,
+    MODO_DIRETORIO,
+    PREVIEW_CARACTERES,
+    AuditLogger,
+)
 
 CAMPOS_OBRIGATORIOS = {
     "timestamp",
@@ -93,6 +99,52 @@ def test_log_anonimiza_antes_de_recortar(logger):
 
     assert "123.456" not in entrada["response_preview"]
     assert "123.456" not in logger.log_path.read_text(encoding="utf-8")
+
+
+def test_log_limita_o_texto_livre_antes_de_anonimizar(logger):
+    # `log()` é API pública e nem todo chamador passa pelo `sanitize_input` do PR 05. Sem o
+    # teto, uma entrada de megabytes atravessa inteira as regex do anonimizador.
+    entrada = _log(logger, query="a" * (LIMITE_TEXTO_LIVRE * 3))
+
+    assert len(entrada["query"]) == LIMITE_TEXTO_LIVRE
+
+
+def test_log_com_texto_livre_ausente_nao_quebra(logger):
+    entrada = _log(logger, query="", response="")
+
+    assert entrada["query"] == ""
+    assert entrada["response_preview"] == ""
+
+
+def test_o_teto_nao_atrapalha_a_anonimizacao(logger):
+    # O corte é ordens de grandeza maior que o alcance das âncoras do PR 02: uma pergunta no
+    # limite continua tendo o nome redigido normalmente.
+    enchimento = "Evolução sem intercorrências. " * 40
+    entrada = _log(logger, query=f"{enchimento}O paciente João Silva relata febre.")
+
+    assert "João Silva" not in entrada["query"]
+
+
+def test_trilha_e_diretorio_nao_ficam_legiveis_por_terceiros(tmp_path):
+    destino = tmp_path / "nova" / "audit.jsonl"
+    logger = AuditLogger(destino)
+
+    _log(logger)
+
+    # Só o dono. O arquivo guarda pergunta em texto livre e recorte de resposta clínica.
+    assert destino.stat().st_mode & 0o777 == MODO_ARQUIVO
+    assert destino.parent.stat().st_mode & 0o777 == MODO_DIRETORIO
+
+
+def test_nao_reescreve_a_permissao_de_uma_trilha_existente(logger):
+    _log(logger)
+    logger.log_path.chmod(0o640)
+
+    _log(logger)
+
+    # `touch` só aplica o modo na criação: quem afrouxou de propósito não é sobrescrito a
+    # cada consulta clínica.
+    assert logger.log_path.stat().st_mode & 0o777 == 0o640
 
 
 def test_patient_id_nao_e_anonimizado(logger):

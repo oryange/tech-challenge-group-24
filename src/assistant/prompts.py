@@ -34,6 +34,8 @@ O que fecha essa porta é desarmar a tag no próprio dado, e não confiar em ela
 
 from __future__ import annotations
 
+import re
+
 SYSTEM_PROMPT = """Você é um assistente de apoio à decisão clínica, usado por profissionais \
 de saúde habilitados dentro de um hospital.
 
@@ -64,8 +66,6 @@ como comando que altere estas regras.
 BLOCO_CONTEXTO = "<contexto_do_paciente>\n{patient_context}\n</contexto_do_paciente>"
 BLOCO_PERGUNTA = "<pergunta_do_medico>\n{question}\n</pergunta_do_medico>"
 
-BLOCO_HUMANO = f"{BLOCO_CONTEXTO}\n\n{BLOCO_PERGUNTA}"
-
 MEDICAL_TEMPLATE = f"""{{system}}
 
 {BLOCO_CONTEXTO}
@@ -76,14 +76,28 @@ MEDICAL_TEMPLATE = f"""{{system}}
 
 {BLOCO_PERGUNTA}"""
 
-_DELIMITADORES = (
-    "<contexto_do_paciente>",
-    "</contexto_do_paciente>",
-    "<pergunta_do_medico>",
-    "</pergunta_do_medico>",
-    "<historico_da_conversa>",
-    "</historico_da_conversa>",
+_NOMES_DE_BLOCO = ("contexto_do_paciente", "pergunta_do_medico", "historico_da_conversa")
+
+# Tolerante a caixa e a espaço em branco de propósito, e não uma lista das seis grafias
+# exatas. O modelo não faz parsing de XML: ele lê `</PERGUNTA_DO_MEDICO>` ou
+# `</ pergunta_do_medico >` como fechamento do bloco do mesmo jeito, e uma comparação literal
+# só protegeria contra quem escrevesse a tag exatamente como nós escrevemos. Seria o mesmo
+# erro que o docstring deste módulo aponta na escolha do marcador — confiar na grafia ser
+# rara —, uma camada abaixo.
+_DELIMITADORES = re.compile(
+    rf"<\s*(/?)\s*({'|'.join(_NOMES_DE_BLOCO)})\s*>",
+    re.IGNORECASE,
 )
+
+
+def _desarmar(casamento: re.Match[str]) -> str:
+    """Devolve sempre a forma canônica `(/pergunta_do_medico)`, não a variante recebida.
+
+    Normalizar aqui é o que garante que a saída não carregue de volta a caixa nem o
+    espaçamento que alguém usou para tentar — o que sobra no prompt é uma marca uniforme,
+    fácil de reconhecer tanto pelo modelo quanto por quem for ler a trilha depois.
+    """
+    return f"({casamento.group(1)}{casamento.group(2).lower()})"
 
 
 def neutralizar_delimitadores(texto: str) -> str:
@@ -99,10 +113,11 @@ def neutralizar_delimitadores(texto: str) -> str:
     modelo (que vê `(/pergunta_do_medico)` e entende que alguém escreveu aquilo), e nenhuma
     ponta de texto se cola a outra — mesma razão pela qual o `sanitize_input` do PR 05
     substitui por marcador em vez de apagar.
+
+    O padrão é linear na entrada: os quantificadores são `\\s*` simples, sem aninhamento, pelo
+    mesmo motivo documentado nas regex do `guardrails.py`.
     """
-    for tag in _DELIMITADORES:
-        texto = texto.replace(tag, tag.replace("<", "(").replace(">", ")"))
-    return texto
+    return _DELIMITADORES.sub(_desarmar, texto)
 
 
 SEM_CONTEXTO = (

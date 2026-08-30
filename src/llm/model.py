@@ -146,6 +146,32 @@ class MedicalMLXLLM(LLM):
             tokenize=False,
         )
 
+    def _conferir_adapter(self) -> None:
+        if self.adapter_path is not None and not Path(self.adapter_path).is_dir():
+            raise FileNotFoundError(
+                f"{self.adapter_path} não existe. Rode 'python -m src.fine_tuning.trainer' "
+                "antes, ou passe adapter_path=None para servir o modelo base."
+            )
+
+    def preload(self) -> None:
+        """Carrega pesos e tokenizer agora, em vez de na primeira geração.
+
+        O carregamento é preguiçoso por padrão, e isso é o certo para quem importa a classe:
+        construir o objeto não deve custar dezenas de segundos e alguns GB de RAM.
+
+        Para a interface interativa é o oposto. Ela anuncia "carregando modelo e adapters" e
+        em seguida devolve o prompt na hora, porque nada foi carregado ainda — a espera de
+        verdade acontece na primeira pergunta, junto com o que o MLX imprime no stderr ao
+        inicializar. O usuário lê isso como "a pergunta travou", e na demonstração o ruído cai
+        no meio da primeira resposta. Adiantar o carregamento não economiza tempo nenhum: põe
+        a espera no ponto em que ela foi anunciada, que é onde ela é compreensível.
+
+        Idempotente pelo mesmo `_MODELOS_CARREGADOS` que o `_call` usa: chamar duas vezes não
+        recarrega, e chamar antes do `_call` não faz o `_call` carregar de novo.
+        """
+        self._conferir_adapter()
+        _carregar(self.model_path, self.adapter_path, self.revision)
+
     def _call(
         self,
         prompt: str,
@@ -154,11 +180,7 @@ class MedicalMLXLLM(LLM):
         **kwargs: Any,
     ) -> str:
         """Gera a resposta para um prompt já montado."""
-        if self.adapter_path is not None and not Path(self.adapter_path).is_dir():
-            raise FileNotFoundError(
-                f"{self.adapter_path} não existe. Rode 'python -m src.fine_tuning.trainer' "
-                "antes, ou passe adapter_path=None para servir o modelo base."
-            )
+        self._conferir_adapter()
 
         from mlx_lm import generate
         from mlx_lm.sample_utils import make_sampler

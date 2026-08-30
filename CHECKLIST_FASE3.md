@@ -485,6 +485,15 @@ tech-challenge-group-24/
       pacientes sem carregar o modelo. O interativo é ruim para testar: obriga a esperar o
       carregamento e redigitar tudo a cada rodada, e o resultado não dá para repetir nem
       colar num relatório
+    - O `--paciente` passa pela mesma normalização do passo 1. Encontrado rodando: `--paciente 5`
+      — a forma que o próprio interativo ensina — chegava cru ao retriever e era recusado com
+      uma mensagem pedindo o token completo. Duas formas de dizer o mesmo paciente na mesma
+      interface, uma delas rejeitada, é defeito da interface
+    - `MedicalAssistant.preload()` carrega o modelo logo depois do banner. O carregamento é
+      preguiçoso (e deve ser, para quem importa a classe), mas na interface isso tornava a
+      mensagem "carregando modelo e adapters" falsa: o prompt voltava na hora e a espera de
+      ~6s caía dentro da primeira pergunta, junto com o que o MLX imprime no stderr ao
+      inicializar. Não economiza tempo — põe a espera onde ela foi anunciada
     - Silencia o ruído do `transformers` e do `huggingface_hub` só no modo interativo (a
       variável tem de entrar no ambiente antes do import), e o aviso de depreciação só no
       `main()` — na suíte ele continua visível, que é onde serve de lembrete
@@ -741,3 +750,42 @@ Composição do `data/processed/mlx/train.jsonl` (903 exemplos), que explica o p
       resposta. É o que produz citação improvisada e malformada (`[Fonte:CID A09]`,
       `[Fonte: avaliação:E11]`) — a explainability é cobrada na inferência e quase não é
       treinada
+
+### P3 — Revisão de segurança: o que ficou fora do PR 07
+
+Revisão de segurança da branch (Python, 6 arquivos): 0 críticos, 0 altos. Compliant no que
+mais importava — SQL injection pelo `patient_id` (ORM com parâmetros vinculados mais a
+allowlist ancorada), log injection no JSONL (`json.dumps` escapa `\n` e aspas), a ordem
+anonimiza-antes-de-recortar, as regex do `guardrails.py` (lineares, sem quantificador
+aninhado) e a camada estrutural de prompt injection.
+
+Corrigido dentro deste PR:
+
+- `neutralizar_delimitadores` passou a casar por regex tolerante a caixa e a espaço
+  (`</PERGUNTA_DO_MEDICO>` e `</ pergunta_do_medico >` fechavam o bloco e passavam intactos)
+- `AuditLogger.log` ganhou teto de 2000 caracteres antes do `anonymize`, porque `log()` é API
+  pública e nem todo chamador passa pelo `sanitize_input` do PR 05
+- a trilha e o diretório dela passaram a ser criados em `0600`/`0700`
+
+O que **não** foi corrigido, e por quê:
+
+- [ ] `DB_PATH` sem `expanduser()`/`resolve()` no `retriever.from_env`. O arquivo do PR 07
+      espelha o `src/database/seed.py` de propósito — consertar só um lado faz o assistente
+      ler o home de verdade enquanto o seed popula um diretório chamado `~`, e a falha aparece
+      como "paciente sem dados". A correção sai nos dois, no arquivo do PR 03.
+- [ ] O `anonymize` do PR 02 é denylist **ancorada em contexto**: redige nome precedido de
+      "paciente"/"Dr.", mas `"João Silva ainda está com febre?"` — como um médico digita — vai
+      em claro para o `audit.jsonl`. A função foi escrita para curar dataset, onde o texto é
+      estruturado, e está sendo reusada sobre digitação livre. Uma passada não ancorada, ou
+      falhar fechado quando não dá para redigir com confiança, é mudança no `anonymizer.py`
+      (PR 02) e afeta o dataset inteiro.
+- [ ] O `response_preview` de 200 caracteres é derivado do contexto clínico. O PR 07 acerta ao
+      não gravar o contexto cru, mas a resposta o reafirma — e o arquivo é aberto no notebook e
+      gravado no vídeo de entrega. Decidir se `source` + `guardrail_triggered` já respondem as
+      perguntas de auditoria (e o preview sai) é decisão de produto do PR 06, não ajuste local.
+- **Containment de caminho não é bug e não será adicionado.** `AUDIT_LOG_PATH` e `DB_PATH`
+  saem do `.env` de quem roda o comando — mesma decisão e mesmo motivo já documentados em
+  `config._do_ambiente`: não há fronteira de privilégio para defender, e apontar log ou banco
+  para fora do repositório é o motivo de as variáveis existirem.
+- `_historicos` e `_MODELOS_CARREGADOS` sem eviction só importam se a classe virar serviço; a
+  CLI usa uma sessão fixa. Fica para o PR que expuser o assistente por HTTP, se houver.

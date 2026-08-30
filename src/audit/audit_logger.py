@@ -48,6 +48,22 @@ CAMINHO_PADRAO = RAIZ / "logs" / "audit.jsonl"
 # nenhuma pergunta de auditoria que o recorte já não responda.
 PREVIEW_CARACTERES = 200
 
+# Teto do texto livre que chega ao `anonymize`, aplicado **antes** dele. Não é o recorte de
+# auditoria (esse é o `PREVIEW_CARACTERES`, e vem depois): é o limite do trabalho que uma
+# entrada gigante impõe às regex do PR 02, algumas das quais não são lineares. Pelo fluxo do
+# assistente o texto já chega truncado em 2000 pelo `sanitize_input` do PR 05; aqui o mesmo
+# número é repetido porque `log()` é API pública — o docstring deste módulo mostra a chamada
+# direta — e um controle que depende de todo chamador ter passado por outro módulo não é
+# controle. Folgado o bastante para não interferir nas âncoras do anonimizador, que casam
+# dentro de poucas dezenas de caracteres.
+LIMITE_TEXTO_LIVRE = 2000
+
+# Permissões do que é criado aqui. O arquivo guarda pergunta de médico em texto livre e um
+# recorte de resposta clínica; o padrão do umask (0644) o deixa legível por qualquer conta da
+# máquina, sem que nada no fluxo denuncie isso.
+MODO_DIRETORIO = 0o700
+MODO_ARQUIVO = 0o600
+
 
 def _caminho_do_ambiente(variavel: str, padrao: Path) -> Path:
     """Lê um caminho do `.env`, ancorando o relativo na raiz do repositório.
@@ -72,7 +88,7 @@ class AuditLogger:
         # O diretório é criado aqui, e não na primeira escrita, para que um AUDIT_LOG_PATH
         # apontando para diretório inexistente falhe na construção — e não no meio de uma
         # consulta clínica, que é quando a primeira escrita acontece.
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.log_path.parent.mkdir(parents=True, exist_ok=True, mode=MODO_DIRETORIO)
 
     @classmethod
     def from_env(cls) -> "AuditLogger":
@@ -99,19 +115,28 @@ class AuditLogger:
         `patient_id` não passa pela anonimização porque já é um token — `[PACIENTE_007]`,
         gerado pelo seed do PR 03. Anonimizá-lo destruiria a chave de filtro do
         `get_patient_logs` sem proteger dado nenhum.
+
+        O teto de `LIMITE_TEXTO_LIVRE` é o único corte que vem **antes** da anonimização, e
+        não contradiz o parágrafo acima: ele é ordens de grandeza maior que o alcance das
+        âncoras, então nenhuma regra deixa de casar por causa dele.
         """
         entrada = {
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "session_id": session_id,
             "patient_id": patient_id,
-            "query": anonymize(query),
-            "response_preview": anonymize(response)[:PREVIEW_CARACTERES],
+            "query": anonymize((query or "")[:LIMITE_TEXTO_LIVRE]),
+            "response_preview": anonymize((response or "")[:LIMITE_TEXTO_LIVRE])[
+                :PREVIEW_CARACTERES
+            ],
             "source": source,
             "guardrail_triggered": guardrail_triggered,
         }
         # `ensure_ascii=False` mantém o português legível no arquivo: com o padrão, "asmática"
         # vira "asmática" e a trilha fica ilegível justamente na hora de exibi-la.
         linha = json.dumps(entrada, ensure_ascii=False)
+        # `touch` antes do append: o modo só vale no instante da criação, e é o único momento
+        # em que dá para fixá-lo sem mexer na permissão de um arquivo que alguém já ajustou.
+        self.log_path.touch(mode=MODO_ARQUIVO, exist_ok=True)
         with self.log_path.open("a", encoding="utf-8") as arquivo:
             arquivo.write(f"{linha}\n")
         return entrada
