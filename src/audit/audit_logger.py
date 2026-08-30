@@ -2,9 +2,9 @@
 
 Uso como biblioteca:
 
-    from src.audit.audit_logger import audit_logger
+    from src.audit.audit_logger import get_audit_logger
 
-    audit_logger.log(
+    get_audit_logger().log(
         query="Quais exames estão pendentes?",
         response="Hemograma e glicemia. [Fonte: exames do paciente]",
         patient_id="[PACIENTE_007]",
@@ -147,9 +147,22 @@ class AuditLogger:
         return [e for e in self._ler() if e.get("patient_id") == patient_id]
 
 
-# Instância pronta para o PR 07 e o PR 08 usarem sem repetir a leitura do `.env`.
-#
-# Construída no import, o que cria o diretório do log nesse momento. É aceitável aqui: o
-# `logs/` já existe versionado no repositório desde o PR 01, então no caminho padrão a
-# criação é no-op, e quem aponta `AUDIT_LOG_PATH` para outro lugar quer o diretório criado.
-audit_logger = AuditLogger.from_env()
+_PADRAO: AuditLogger | None = None
+
+
+def get_audit_logger() -> AuditLogger:
+    """Instância compartilhada, para quem não quer repetir a leitura do `.env`.
+
+    Construída na primeira chamada e não no import, de propósito. Uma instância de módulo
+    lê o ambiente no instante em que o módulo é importado — que num programa de linha de
+    comando é **antes** do `load_dotenv`, porque os imports vêm antes de qualquer execução.
+    O `AUDIT_LOG_PATH` do `.env` seria ignorado sem nada denunciar, e a trilha apareceria no
+    caminho padrão enquanto o resto do sistema apontaria para o configurado. Adiando a
+    construção, quem chama já está com o ambiente carregado.
+
+    O mesmo vale para o `mkdir` do construtor, que deixa de ser efeito colateral de import.
+    """
+    global _PADRAO
+    if _PADRAO is None:
+        _PADRAO = AuditLogger.from_env()
+    return _PADRAO

@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+import src.audit.audit_logger as audit_logger_module
 from src.audit.audit_logger import PREVIEW_CARACTERES, AuditLogger
 
 CAMPOS_OBRIGATORIOS = {
@@ -163,3 +164,21 @@ def test_from_env_ancora_relativo_na_raiz(monkeypatch):
 
     assert logger.log_path.is_absolute()
     assert logger.log_path.parts[-2:] == ("logs", "audit.jsonl")
+
+
+def test_get_audit_logger_le_o_ambiente_na_chamada_e_nao_no_import(monkeypatch, tmp_path):
+    # A regressão que este teste fixa: instância construída no import lê o ambiente antes do
+    # `load_dotenv` de um programa de linha de comando, e o AUDIT_LOG_PATH do `.env` é
+    # ignorado sem nada denunciar.
+    monkeypatch.setattr(audit_logger_module, "_PADRAO", None)
+    monkeypatch.setenv("AUDIT_LOG_PATH", str(tmp_path / "tardio" / "audit.jsonl"))
+
+    logger = audit_logger_module.get_audit_logger()
+
+    assert logger.log_path == tmp_path / "tardio" / "audit.jsonl"
+
+
+def test_get_audit_logger_reaproveita_a_mesma_instancia(monkeypatch):
+    monkeypatch.setattr(audit_logger_module, "_PADRAO", None)
+
+    assert audit_logger_module.get_audit_logger() is audit_logger_module.get_audit_logger()
