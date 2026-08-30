@@ -284,13 +284,29 @@ tech-challenge-group-24/
     - `__init__(log_path)`: inicializa com path do arquivo JSONL e cria o diretório pai
       (`os.makedirs(..., exist_ok=True)`) — sem isso, um `AUDIT_LOG_PATH` em diretório
       inexistente estoura `FileNotFoundError` na primeira escrita
-    - `log(query, response, patient_id, source, guardrail_triggered, session_id)`:
-      - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered"}`
-      - `query` e `response_preview` passam pelo `anonymize` do PR 02 antes de gravar: a
+    - `log(query, response, patient_id, source, guardrail_triggered, session_id, tem_fonte,
+      motivos)`:
+      - Escreve linha JSON: `{"timestamp", "session_id", "patient_id", "query", "response_preview" (200 chars), "source", "guardrail_triggered", "tem_fonte", "motivos"}`
+      - `tem_fonte` e `motivos` fecham o `ResultadoGuardrails` do PR 05: têm default, então a
+        assinatura acima continua válida, mas sem eles a métrica de explainability seria
+        calculada no PR 05 e não chegaria a nada persistido. `tem_fonte=None` é "não foi
+        medido", diferente de `False` ("não tinha fonte")
+      - `timestamp` com resolução de milissegundos: duas interações da mesma sessão cabem no
+        mesmo segundo, e aí quem ordena por timestamp perde a ordem entre elas
+      - `query` e `response_preview` passam por `_anonimizar_conversa` antes de gravar: a
         pergunta é texto livre digitado na hora e pode trazer nome, telefone ou prontuário
         reais — dado que nenhum pipeline anterior viu, porque eles anonimizam dataset e
         banco, não a conversa. Este arquivo é o único que persiste esse texto em disco, e
         ainda é exibido no notebook de demonstração e no vídeo de entrega
+      - `_anonimizar_conversa` = `anonymize` do PR 02 + `_PII_CONVERSA` (CPF e celular sem
+        formatação). As regras do PR 02 são ancoradas em contexto para não destruir termos do
+        PubMedQA, e quem digita no chat raramente traz a âncora; complementar aqui evita
+        afrouxar o anonymizer e degradar o dataset de treino
+      - **Limite declarado:** nome não ancorado passa ("Maria Silva está com febre" sai
+        inteiro). Detectar nome próprio solto por regex tem falso positivo caro em texto
+        clínico, então o módulo documenta a anonimização como best-effort em vez de afirmar
+        uma garantia que não dá — mesmo critério da denylist do PR 05. Enquanto valer,
+        `logs/audit.jsonl` é dado sensível e o que for exibido no vídeo precisa ser conferido
       - Anonimiza **antes** de recortar em 200 caracteres: recortando primeiro, o corte cai
         no meio de um dado e a regra deixa de casar (um CPF partido perde os dois dígitos
         finais que a regra exige), gravando o pedaço em claro
@@ -304,6 +320,9 @@ tech-challenge-group-24/
     - leitura pula linha corrompida em vez de estourar: o caso real é o processo morrer no
       meio de uma escrita, e uma trilha que se recusa a abrir por causa disso perde as
       entradas íntegras junto com a quebrada
+      - mas emite `warnings.warn` com a contagem: descartar em silêncio faz "uma linha
+        ilegível" e "arquivo inteiro ilegível" terminarem no mesmo `[]`, e aí a leitura
+        conclui "não houve interação" em vez de "a trilha está ilegível"
   - Instância global `audit_logger` configurada via `.env` (fecha o `AUDIT_LOG_PATH`, que
     era checado pelo `check_env` sem ninguém lê-lo — mesmo defeito que o PR 04 corrigiu no
     `BASE_MODEL`)
@@ -316,9 +335,16 @@ tech-challenge-group-24/
   - `test_get_patient_logs_filters_correctly()` — filtra por patient_id
   - `test_log_anonimiza_antes_de_recortar()` — CPF a cavaleiro do corte não vaza
   - `test_log_anonimiza_pii_da_pergunta()` — nome na pergunta vira `[PACIENTE]`
-  - `test_linha_corrompida_nao_derruba_a_leitura()` — entradas íntegras sobrevivem
+  - `test_log_anonimiza_telefone_sem_formatacao()` e `test_log_anonimiza_cpf_sem_pontuacao()`
+    — as formas que quem digita no chat usa, e que as âncoras do PR 02 não pegam
+  - `test_log_anonimiza_nome_sem_ancora()` — `xfail(strict=True)`: registra o limite conhecido
+    como falha esperada, para que ele não vire garantia implícita nem passe despercebido caso
+    alguém o resolva
+  - `test_linha_corrompida_nao_derruba_a_leitura()` — entradas íntegras sobrevivem, e o
+    descarte é avisado
+  - `test_log_registra_a_explainability_do_pr05()` — `tem_fonte` e `motivos` são persistidos
 
-**Dependências de outras PRs:** PR 01
+**Dependências de outras PRs:** PR 01, PR 02 (o módulo importa `src.data.anonymizer`)
 
 ---
 
