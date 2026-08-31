@@ -476,6 +476,13 @@ tech-challenge-group-24/
       6. Valida resposta via guardrails
       7. Loga via audit_logger
       8. Retorna `{"response", "source", "guardrail_triggered", "patient_context_used"}`
+      - ⚠️ **Desvio do plano:** o retorno leva uma quinta chave, `alergias_alertadas`, com as
+        alergias do prontuário citadas na pergunta. As quatro do plano continuam todas lá e
+        com o mesmo significado — o acréscimo não remove nem redefine nenhuma. Existe porque
+        o alerta de alergia é imposto pelo código (ver abaixo) e quem chama o `ask` como
+        biblioteca precisa saber que ele disparou sem ter de procurar o texto do carimbo
+        dentro da resposta. A interface interativa acessa o dicionário por chave, então não
+        é afetada.
     - `create_chain(llm)`: monta a chain no estilo **LCEL** do LangChain 1.x —
       `prompt | llm`, envolvida em `RunnableWithMessageHistory` para o histórico da conversa
       (`InMemoryChatMessageHistory` por `session_id`)
@@ -513,6 +520,20 @@ tech-challenge-group-24/
     - O passo 3 usa o aviso de prescrição como **reforço dentro do contexto**, antes da
       inferência: quem pede posologia faz o modelo receber o limite junto do dado, em vez de
       só levar o carimbo depois
+    - **Alerta de alergia, imposto pelo código** (não estava no plano). Quando a pergunta cita
+      uma alergia registrada no prontuário, a resposta abre com o alerta, do mesmo jeito e
+      pela mesma razão que o rodapé de validação do PR 05 é imposto. Medido antes: "o paciente
+      pode receber dipirona?" para o `[PACIENTE_001]`, que tem dipirona registrada, não
+      mencionou a alergia em **4 de 4** tentativas — o modelo respondia sobre o protocolo da
+      condição de base. Depois: 5 perguntas, 4 alertas corretos e 1 negativo correto
+      (amoxicilina, que não é alergia dele, não dispara). O alcance é o que o prontuário
+      registra literalmente: não cobre sinônimo comercial nem reatividade cruzada, e o
+      docstring declara isso
+    - **Fonte conferida contra o contexto** antes de ir para a trilha. Data ou CID citados que
+      não existem no contexto entregue são registrados como fonte ausente, com `warning`.
+      Confere que a fonte *existe*, não que a afirmação saiu dela — atribuição de conteúdo à
+      fonte é problema de outra ordem, e o docstring separa os dois. É o que impede a métrica
+      de explainability de contar citação fabricada como boa
     - O passo 4 monta o prompt pelo `ChatPromptTemplate`, que consome as mesmas constantes de
       bloco do `prompts.py`. O `build_prompt` continua sendo a forma string (notebook e
       relatório técnico) — as duas partem dos mesmos marcadores para não divergirem
