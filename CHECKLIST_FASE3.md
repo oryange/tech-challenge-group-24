@@ -887,3 +887,111 @@ O que **não** foi corrigido, e por quê:
   para fora do repositório é o motivo de as variáveis existirem.
 - `_historicos` e `_MODELOS_CARREGADOS` sem eviction só importam se a classe virar serviço; a
   CLI usa uma sessão fixa. Fica para o PR que expuser o assistente por HTTP, se houver.
+
+### P4 — Review do PR 07: o que a revisão pegou e o que foi corrigido
+
+Oito apontamentos, todos reproduzidos executando o branch antes de mexer. Os seis primeiros
+eram defeito de código; os dois últimos, garantia afirmada acima do que o código cumpria.
+
+Corrigido:
+
+- **Alerta de alergia dependia de o médico já saber o alérgeno.** `alergias_citadas` recebia
+  só a pergunta, então "o paciente pode receber dipirona?" alertava e "qual analgésico posso
+  prescrever?" respondida com "sugiro dipirona 500mg" não — o caso perigoso, porque quem
+  pergunta em aberto é quem não tem o alérgeno na cabeça. Agora os dois lados são conferidos e
+  os conjuntos unidos. O lado da resposta usa o texto já cortado, não o cru: alertar sobre um
+  fármaco que só aparece no trecho repetido é alarme sem referente na tela.
+
+  **O lado da resposta não reproduz com o modelo atual, e isso não desfaz a correção.** Cinco
+  perguntas em aberto sobre analgésico/antitérmico/anti-inflamatório, em quatro pacientes
+  alérgicos, com o modelo real: em nenhuma delas o modelo nomeou fármaco nenhum — recitou o
+  protocolo da condição de base, que é a pendência P2. O gatilho da revisão foi construído
+  forçando a resposta, e é assim que ele está coberto na suíte (`FakeLLM` devolvendo "Sugiro
+  dipirona 500mg"), porque geração não determinística não serve de garantia. Vale registrar a
+  direção: o dia em que o P2 for fechado e o modelo passar a de fato responder qual fármaco
+  usar é exatamente o dia em que esse caminho começa a disparar. A correção custa uma união de
+  conjuntos e fecha o buraco antes de ele abrir.
+- **`_IDENTIFICADOR_DE_FONTE` era sensível à caixa e a comparação não.** `[Fonte: protocolo
+  cid j99]` não casava identificador nenhum, caía no ramo "não há o que conferir" e a citação
+  fabricada entrava na trilha como boa, sem nem o `warnings.warn`. `re.IGNORECASE` fecha.
+- **`source` era o único texto livre sem anonimização.** O mesmo trecho saía anonimizado em
+  `response_preview` e em claro em `source`, na mesma linha do arquivo — e na forma ancorada,
+  que é justamente a que o PR 02 sabe pegar. Agora passa por `_anonimizar_fonte`, com
+  `or None` para não confundir "não citou" com "citou vazio".
+
+  **A data é preservada, e o `anonymize` inteiro não serve aqui.** Rodando o assistente com o
+  modelo real, a trilha saiu com `source: "consulta de [DATA]"` e `tem_fonte: true` — o
+  `fonte_confere` validava a data contra o contexto e o resultado era jogado fora na gravação.
+  `"consulta de [DATA]"` não diz de qual consulta a resposta saiu, que é a única pergunta que
+  este campo existe para responder; a correção trocava um vazamento por uma perda. A data volta
+  ao lugar depois da anonimização, pelo mesmo raciocínio que o módulo já aplica ao
+  `patient_id`: ele vai em claro na mesma linha, então a data não acrescenta poder de
+  reidentificação a quem já tem o token do paciente e o banco. O que precisava ser coberto era
+  o nome, e continua. A restauração é posicional e falha fechado — se uma data extensa também
+  virou token a contagem não bate e nada é restaurado. Verificado ponta a ponta: `consulta do
+  paciente [PACIENTE] de 21/08/2026`, com `tem_fonte: true`.
+- **O histórico guardava a resposta antes do `cortar_repeticao`.** O recorte de 200 caracteres
+  voltava ao prompt cheio da mesma frase repetida, devolvendo ao modelo o ancoramento que a
+  tabela de similaridade do `create_chain` mede e que o histórico-como-texto existe para
+  evitar. Guarda-se a resposta já cortada, ainda sem o rodapé do guardrail.
+- **`MODO_DIRETORIO` não valia no caminho padrão.** `exist_ok=True` não faz `chmod` e `logs/`
+  é versionado, então existia com 0755 desde o clone; e `parents=True` criava os
+  intermediários com o umask. Um `chmod` idempotente no diretório da trilha e nos ancestrais
+  que o construtor criou faz a constante valer o que anuncia. Corrige o que a linha 866 deste
+  arquivo afirmava sem base.
+
+  **Desvio da correção sugerida, e o motivo.** A revisão pedia "um `chmod` idempotente logo
+  após o `mkdir`", e a primeira versão foi exatamente isso — e estava errada: com
+  `AUDIT_LOG_PATH=/tmp/audit.jsonl` a folha é o `/tmp`, e medido, `AuditLogger('/tmp/...')`
+  passou a levantar `PermissionError` **na construção**, quebrando uma configuração que
+  funcionava; com privilégio para acontecer, o `chmod 0700 /tmp` derrubaria a máquina. O
+  `_apertar_diretorios` por isso só aperta a folha quando ela é nossa — diretório gravável por
+  todos (a assinatura do compartilhado, que é o que o sticky bit do `/tmp` existe para tornar
+  seguro) ou de outro `st_uid` fica intocado. Sobre o que o construtor criou não há dúvida de
+  propriedade, e esses não passam pela checagem. Falha de `chmod` avisa em vez de derrubar: o
+  conteúdo já está protegido pelo `touch(mode=0600)`, e recusar a escrever a trilha por causa
+  da permissão da pasta troca uma perda certa (auditoria nenhuma) por uma incerta. Os três
+  casos estão testados.
+- **`tests/test_chain.py` exigia o `datasets` da HuggingFace.** A cadeia
+  `src.database.seed` → `synthetic_generator` → `loader` → `from datasets import
+  load_dataset` impedia até a coleta do módulo. O import virou tardio, em
+  `loader._baixar_dataset`, no mesmo padrão que o `model.py` usa com o `mlx_lm` — a suíte
+  inteira roda sem o ecossistema de treino instalado (verificado bloqueando o módulo).
+- **`_DELIMITADORES` era quadrático, não linear.** Dois `\s*` vizinhos separados por um átomo
+  opcional são ambíguos: `"<" + " " * 16000` levava 2,5 s, quadruplicando a cada dobro. O que
+  pesa é a ambiguidade entre quantificadores vizinhos, não o aninhamento — a premissa do
+  docstring estava errada. Quantificador possessivo (`\s*+`, Python 3.11+) resolve.
+- **Variantes de tag sobreviviam ao neutralizador.** `<pergunta_do_medico/>`,
+  `<pergunta_do_medico id="x">`, a forma de largura completa e a com zero-width space passavam
+  intactas. `NFKC` mais descarte de categoria `Cf` antes do casamento, e cauda de até 64
+  caracteres no padrão, fecham as quatro. O docstring do módulo deixou de afirmar que nenhuma
+  das duas propriedades depende de reconhecer o ataque: a propriedade 1 depende, sim, da forma
+  da tag — ela é forte por não depender do *conteúdo* da injeção, não por ser exaustiva na
+  grafia. Alcance declarado: tag partida por caractere visível (`</pergunta_do_ medico>`)
+  continua fora, por construção.
+
+Ajuste menor tratado junto: com o alerta de alergia disparado, o carimbo ocupava ~130 dos 200
+caracteres do `response_preview` — gastos com a parte determinística, reconstruível a partir
+de `patient_id` mais o prontuário. A trilha passou a gravar a resposta sem o carimbo e as
+alergias em campo próprio (`alergias_alertadas`), que ainda deixa filtrar por "houve alerta".
+
+Não corrigido, e por quê:
+
+- [ ] **O rodapé de validação humana é suprimível pelo próprio modelo.** O
+      `_MARCA_VALIDACAO_NO_FIM` (`guardrails.py:52`) devolve o texto intacto quando a resposta
+      já termina com a marca, e a marca é uma string que o modelo consegue escrever sozinho:
+      `"[Requer validação médica: já conferida por outro colega]"` faz `guardrail_triggered`
+      sair `False` e o médico ler uma marca de validação que afirma que a validação aconteceu.
+      É o mesmo erro de confiar no marcador ser raro, e a saída tem a forma do que o
+      `prompts.py` já faz — desarmar a marca no dado antes de confiar nela. É código do PR 05,
+      e vários docstrings do `chain.py` se apoiam nessa garantia.
+- [ ] **`check_prescription_attempt` não pega posologia sem radical de prescrição.** "Sugiro
+      dipirona 500mg de 6 em 6 horas" não tem `prescr*`/`receit*`/`administr*`. É a denylist do
+      PR 05, com o alcance já declarado lá; o alerta de alergia deixou de depender dele.
+- [ ] **A permissão de um `logs/audit.jsonl` que já existe em 0644 não é promovida.** O
+      `touch(mode=...)` só vale na criação, de propósito — a decisão de não sobrescrever a
+      permissão de quem afrouxou está testada. Quem rodou a versão anterior carrega o arquivo
+      antigo sem nada denunciar; um aviso na leitura resolveria, e é mudança do PR 06.
+- [ ] **A resposta não passa por `sanitize_input` antes de entrar no histórico, a pergunta
+      passa.** Assimetria real, impacto baixo: a denylist é declaradamente contornável e o
+      histórico entra dentro de bloco delimitado, que é a defesa que segura.

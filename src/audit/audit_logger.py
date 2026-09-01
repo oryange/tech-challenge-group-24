@@ -53,7 +53,7 @@ import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.data.anonymizer import TOKEN_PACIENTE_ID, TOKEN_TELEFONE, anonymize
+from src.data.anonymizer import TOKEN_DATA, TOKEN_PACIENTE_ID, TOKEN_TELEFONE, anonymize
 
 RAIZ = Path(__file__).resolve().parents[2]
 CAMINHO_PADRAO = RAIZ / "logs" / "audit.jsonl"
@@ -134,6 +134,88 @@ def _anonimizar_conversa(texto: str) -> str:
     return resultado
 
 
+def _apertar_diretorios(folha: Path, criados: list[Path]) -> None:
+    """Aplica `MODO_DIRETORIO` no diretório da trilha e nos que acabaram de ser criados.
+
+    O `mode=` do `mkdir` sozinho não basta, e as duas limitações são exatamente as duas em que
+    o caminho padrão do projeto cai: `exist_ok=True` devolve sem tocar na permissão de um
+    diretório que já existia — e `logs/` é versionado (`logs/.gitkeep`), logo existe desde o
+    clone com 0755 —, e `parents=True` cria os intermediários com o umask, deixando só o último
+    em 0700. Sem este passo, `MODO_DIRETORIO` não valia justamente onde a trilha é escrita.
+
+    **O que fica de fora, e é o ponto delicado.** Apertar um diretório que não é nosso é pior
+    que o problema que este passo resolve: com `AUDIT_LOG_PATH=/tmp/audit.jsonl` a folha é o
+    `/tmp`, e um `chmod 0700` ali derruba a máquina inteira se tiver privilégio para acontecer
+    — e explode na construção se não tiver, quebrando uma configuração que antes funcionava.
+    Então a folha só é apertada quando é nossa: o diretório compartilhado se identifica por ser
+    gravável por todos (é o que o sticky bit do `/tmp` existe para tornar seguro), e o de outro
+    dono se identifica pelo `st_uid`. Os que este construtor criou não passam por essa checagem
+    porque sobre eles não há dúvida de propriedade.
+
+    Falha de `chmod` avisa em vez de derrubar. A permissão do diretório é defesa em
+    profundidade — o `touch(mode=MODO_ARQUIVO)` já protege o conteúdo —, e recusar a escrever
+    a trilha porque não deu para endurecer a pasta troca uma perda certa (auditoria nenhuma)
+    por uma incerta.
+    """
+    for diretorio in dict.fromkeys([*criados, folha]):
+        if diretorio not in criados:
+            try:
+                info = diretorio.stat()
+            except OSError:
+                continue
+            compartilhado = bool(info.st_mode & 0o002)
+            de_outro_dono = hasattr(os, "getuid") and info.st_uid != os.getuid()
+            if compartilhado or de_outro_dono:
+                continue
+        try:
+            diretorio.chmod(MODO_DIRETORIO)
+        except OSError as erro:
+            warnings.warn(
+                f"Não foi possível restringir {diretorio} a {MODO_DIRETORIO:o}: {erro}. "
+                "A trilha continua sendo criada em modo 0600.",
+                stacklevel=3,
+            )
+
+
+# As duas formas numéricas de data. A extensa ("12 de março de 2024") fica de fora de
+# propósito: o modelo cita a data no formato em que ela está no prontuário, e se a extensa
+# aparecer o resultado é ela continuar redigida — o lado seguro de errar aqui.
+_DATA_RASTREAVEL = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b")
+
+
+def _anonimizar_fonte(texto: str) -> str:
+    """Anonimiza a citação de fonte, mas devolve as datas ao lugar.
+
+    O `source` é texto livre gerado pelo modelo e precisa da mesma anonimização dos outros
+    campos — o modelo cita `[Fonte: consulta do paciente Joao Souza de 12/03/2026]`, que é
+    justamente a forma **ancorada** que as regras do PR 02 sabem pegar. Sem isso o mesmo trecho
+    saía anonimizado em `response_preview` e em claro em `source`, na mesma linha do arquivo.
+
+    A data, porém, volta. O `anonymize` redige data junto com nome, e aplicá-lo inteiro trocava
+    um vazamento por uma perda: `"consulta de [DATA]"` não diz de qual consulta a resposta
+    saiu, que é a única pergunta que este campo existe para responder — e é o identificador que
+    o `fonte_confere` acabou de validar contra o contexto. Medido no assistente completo, a
+    trilha real saía com `source: "consulta de [DATA]"` e `tem_fonte: true`: a conferência
+    acontecia e o resultado dela era jogado fora.
+
+    Preservar a data não afrouxa nada, e é o mesmo raciocínio que este módulo já aplica ao
+    `patient_id`: ele vai em claro na mesma linha, então a data não acrescenta poder de
+    reidentificação nenhum a quem já tem o token do paciente e o banco. O que a anonimização
+    precisa cobrir aqui é o nome, e esse continua coberto.
+
+    A restauração é posicional e falha fechado: se a contagem de `[DATA]` no texto anonimizado
+    não bater com a de datas numéricas do original — o que acontece quando uma data extensa
+    também virou token —, nada é restaurado e tudo continua redigido.
+    """
+    anonimizado = _anonimizar_conversa(texto)
+    datas = _DATA_RASTREAVEL.findall(texto)
+    if not datas or anonimizado.count(TOKEN_DATA) != len(datas):
+        return anonimizado
+    for data in datas:
+        anonimizado = anonimizado.replace(TOKEN_DATA, data, 1)
+    return anonimizado
+
+
 def _caminho_do_ambiente(variavel: str, padrao: Path) -> Path:
     """Lê um caminho do `.env`, ancorando o relativo na raiz do repositório.
 
@@ -157,7 +239,11 @@ class AuditLogger:
         # O diretório é criado aqui, e não na primeira escrita, para que um AUDIT_LOG_PATH
         # apontando para diretório inexistente falhe na construção — e não no meio de uma
         # consulta clínica, que é quando a primeira escrita acontece.
-        self.log_path.parent.mkdir(parents=True, exist_ok=True, mode=MODO_DIRETORIO)
+        pai = self.log_path.parent
+        # Quem não existe agora é quem o `mkdir` abaixo vai criar. Precisa ser medido antes.
+        criados = [d for d in (pai, *pai.parents) if not d.exists()]
+        pai.mkdir(parents=True, exist_ok=True, mode=MODO_DIRETORIO)
+        _apertar_diretorios(pai, criados)
 
     @classmethod
     def from_env(cls) -> "AuditLogger":
@@ -174,6 +260,7 @@ class AuditLogger:
         session_id: str | None = None,
         tem_fonte: bool | None = None,
         motivos: tuple[str, ...] = (),
+        alergias_alertadas: tuple[str, ...] = (),
     ) -> dict:
         """Registra uma interação e devolve a entrada gravada.
 
@@ -193,11 +280,20 @@ class AuditLogger:
         exatamente em cima do corte: `_limitar_texto_livre` recua até o espaço anterior para
         que nenhum token chegue partido ao anonimizador.
 
+        `source` também é texto livre e também é anonimizado, com a data preservada — o porquê
+        de cada metade está em `_anonimizar_fonte`. O `or None` no fim mantém a distinção entre
+        "não citou fonte" e "citou uma fonte vazia", que o `extrair_fonte` do PR 07 preserva.
+
         `tem_fonte` e `motivos` recebem o resto do `ResultadoGuardrails` do PR 05. Eles têm
         default e a assinatura do checklist continua valendo, mas sem eles a métrica de
         explainability — que é requisito do enunciado — seria calculada no PR 05 e não
         chegaria a nenhum lugar persistido. `tem_fonte=None` distingue "não foi medido" de
         "não tinha fonte", que numa auditoria são conclusões diferentes.
+
+        `alergias_alertadas` é campo próprio, e não parte da resposta gravada, pelo mesmo
+        motivo: o carimbo determinístico do PR 07 ocupa dois terços do recorte de auditoria com
+        um texto reconstruível a partir de `patient_id` mais o prontuário. Em campo separado
+        ele não come o recorte e ainda deixa a trilha filtrável por "houve alerta".
         """
         entrada = {
             # Milissegundos, não segundos: duas interações da mesma sessão cabem no mesmo
@@ -210,10 +306,11 @@ class AuditLogger:
             "response_preview": _anonimizar_conversa(
                 _limitar_texto_livre(response or "")
             )[:PREVIEW_CARACTERES],
-            "source": source,
+            "source": _anonimizar_fonte(_limitar_texto_livre(source or "")) or None,
             "guardrail_triggered": guardrail_triggered,
             "tem_fonte": tem_fonte,
             "motivos": list(motivos),
+            "alergias_alertadas": list(alergias_alertadas),
         }
         # `ensure_ascii=False` mantém o português legível no arquivo: com o padrão, "asmática"
         # vira "asmática" e a trilha fica ilegível justamente na hora de exibi-la.

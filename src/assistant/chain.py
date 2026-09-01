@@ -128,7 +128,17 @@ _TERMOS = re.compile(r"[^\W_]+", re.UNICODE)
 # `J45.0`). São os dois formatos que o `SYSTEM_PROMPT` manda o modelo citar e os dois que ele
 # consegue inventar com aparência de legítimos — o resto da citação é prosa, que não dá para
 # conferir por comparação literal sem barrar paráfrase correta.
-_IDENTIFICADOR_DE_FONTE = re.compile(r"\d{2}/\d{2}/\d{4}|\b[A-Z]\d{2}(?:\.\d+)?\b")
+#
+# `IGNORECASE` porque a comparação adiante é feita sobre a forma de `_normalizar`, que baixa
+# tudo para minúscula. Sem ele a detecção era sensível à caixa e a comparação não, e a fresta
+# invertia o resultado da função: `[Fonte: protocolo cid j99]` não casava identificador nenhum,
+# caía no `if not identificadores` e a citação fabricada entrava na trilha como conferida — sem
+# nem o aviso que denunciaria. Errar para o lado de casar demais é o lado certo aqui: um falso
+# identificador na prosa faz a fonte ser conferida contra o contexto, não descartada de saída.
+_IDENTIFICADOR_DE_FONTE = re.compile(
+    r"\d{2}/\d{2}/\d{4}|\b[A-Z]\d{2}(?:\.\d+)?\b",
+    re.IGNORECASE,
+)
 
 
 def _normalizar(texto: str) -> str:
@@ -141,14 +151,18 @@ def _normalizar(texto: str) -> str:
     return "".join(caractere for caractere in decomposto if not unicodedata.combining(caractere))
 
 
-def alergias_citadas(pergunta: str, alergias: list[str]) -> list[str]:
-    """Alergias do prontuário mencionadas na pergunta, na grafia original do prontuário.
+def alergias_citadas(texto: str, alergias: list[str]) -> list[str]:
+    """Alergias do prontuário mencionadas num texto, na grafia original do prontuário.
+
+    O texto é a pergunta do médico **ou** a resposta do modelo: as duas passam por aqui, e o
+    porquê está em `ask`. A função não sabe qual é qual de propósito — a pergunta que cita o
+    fármaco e a resposta que o oferece são o mesmo problema visto de dois lados.
 
     A comparação é por termo inteiro e não por substring: "sulfa" como substring casaria
     dentro de "sulfametoxazol" — o que aqui até seria desejável — mas também dentro de
     palavras sem relação, e um alerta que dispara sozinho é ignorado depois da terceira vez.
     Alergia registrada com mais de uma palavra ("contraste iodado") casa quando todos os
-    termos dela aparecem na pergunta.
+    termos dela aparecem no texto.
 
     O alcance é o que o prontuário registra, literalmente: esta função **não** sabe que
     "novalgina" é dipirona nem que um paciente alérgico a penicilina pode reagir a
@@ -156,11 +170,11 @@ def alergias_citadas(pergunta: str, alergias: list[str]) -> list[str]:
     projeto não tem, e afirmar a garantia maior seria pior do que declarar esta — mesma razão
     pela qual o `audit_logger` declara que não cobre nome sem âncora.
     """
-    na_pergunta = set(_TERMOS.findall(_normalizar(pergunta)))
+    no_texto = set(_TERMOS.findall(_normalizar(texto)))
     citadas = []
     for alergia in alergias:
         termos = set(_TERMOS.findall(_normalizar(alergia)))
-        if termos and termos <= na_pergunta:
+        if termos and termos <= no_texto:
             citadas.append(alergia)
     return citadas
 
@@ -416,11 +430,16 @@ class MedicalAssistant:
         pergunta = sanitize_input(question)
 
         contexto = None
+        alergias_do_paciente: list[str] = []
         alergias_na_pergunta: list[str] = []
         if patient_id:
             dados = self.retriever.get_patient_context(patient_id)
             contexto = dados["contexto"]
-            alergias_na_pergunta = alergias_citadas(pergunta, dados["alergias"])
+            # A lista completa sobrevive ao `if` porque a resposta também é conferida contra
+            # ela, adiante — só o reforço no contexto usa o lado da pergunta, porque ele é
+            # montado antes da inferência.
+            alergias_do_paciente = dados["alergias"]
+            alergias_na_pergunta = alergias_citadas(pergunta, alergias_do_paciente)
 
         pediu_prescricao, aviso = check_prescription_attempt(pergunta)
         if pediu_prescricao:
@@ -460,24 +479,47 @@ class MedicalAssistant:
             }
         )
 
-        # A pergunta guardada é a saneada, e a resposta é a crua: o rodapé de validação e o
-        # aviso de prescrição são acrescentados pelo guardrail a cada turno, e realimentá-los
-        # ensinaria o modelo a escrevê-los sozinho — o que faria a marca deixar de distinguir
-        # o que o guardrail garantiu do que o modelo inventou.
-        historico.add_user_message(pergunta)
-        historico.add_ai_message(bruta)
+        # O corte de repetição vem antes do guardrail: o rodapé de validação tem de ficar no
+        # fim do texto que o médico lê, não enterrado no meio do trecho repetido.
+        limpa = deduplicar_fontes(cortar_repeticao(bruta))
 
-        # O corte vem antes do guardrail: o rodapé de validação tem de ficar no fim do
-        # texto que o médico lê, não enterrado no meio do trecho repetido.
-        resultado = apply_guardrails(pergunta, deduplicar_fontes(cortar_repeticao(bruta)))
+        # A pergunta guardada é a saneada, e a resposta é a já cortada, mas ainda sem o rodapé
+        # do guardrail. As duas exclusões têm motivos diferentes:
+        #
+        # - O rodapé de validação e o aviso de prescrição são acrescentados a cada turno, e
+        #   realimentá-los ensinaria o modelo a escrevê-los sozinho — o que faria a marca
+        #   deixar de distinguir o que o guardrail garantiu do que o modelo inventou.
+        # - O trecho repetido fica de fora porque `_formatar_historico` manda os primeiros
+        #   `RESUMO_DA_RESPOSTA` caracteres de volta ao prompt: com o modelo em degeneração,
+        #   guardar a resposta crua enchia esse recorte de uma frase repetida oito vezes e
+        #   devolvia ao modelo exatamente o ancoramento que a tabela de similaridade do
+        #   `create_chain` mede — e que o histórico-como-texto existe para evitar.
+        historico.add_user_message(pergunta)
+        historico.add_ai_message(limpa)
+
+        resultado = apply_guardrails(pergunta, limpa)
+
+        # O alerta é conferido nos **dois** lados, pergunta e resposta, e não só na pergunta:
+        # checar só a pergunta faz o alerta sair em "o paciente pode receber dipirona?" e não
+        # sair em "qual analgésico posso prescrever?" respondida com "sugiro dipirona 500mg" —
+        # que é o caso perigoso, porque quem pergunta em aberto é justamente quem não tem o
+        # alérgeno na cabeça. É o mesmo princípio que o `guardrails.py` já registra pelo lado
+        # da posologia oferecida espontaneamente.
+        #
+        # O lado da resposta é conferido sobre `limpa` e não sobre `bruta`: alertar sobre um
+        # fármaco que só aparece no trecho repetido, que o médico não chega a ver, é alarme sem
+        # referente na tela — e alerta que dispara sozinho deixa de ser lido.
+        alergias_alertadas = sorted(
+            set(alergias_na_pergunta) | set(alergias_citadas(limpa, alergias_do_paciente))
+        )
 
         # O carimbo é aplicado depois do guardrail e no topo do texto — ver `ALERTA_ALERGIA`.
         # Se o modelo já mencionou a alergia por conta própria, o carimbo continua vindo: o
         # médico precisa saber qual alerta veio do prontuário e qual veio da geração, e
         # suprimir o determinístico por semelhança devolveria a garantia ao modelo.
         resposta = resultado.resposta
-        if alergias_na_pergunta:
-            alerta = ALERTA_ALERGIA.format(alergias=", ".join(alergias_na_pergunta))
+        if alergias_alertadas:
+            alerta = ALERTA_ALERGIA.format(alergias=", ".join(alergias_alertadas))
             resposta = f"{alerta}\n\n{resposta}"
 
         fonte = extrair_fonte(resposta)
@@ -495,9 +537,15 @@ class MedicalAssistant:
         # PR 06. O contexto do paciente fica de fora de propósito: ele já está no banco, e
         # copiá-lo para um arquivo que é aberto no notebook e gravado no vídeo de entrega
         # espalharia dado clínico sem responder nenhuma pergunta de auditoria a mais.
+        #
+        # A resposta gravada é a do guardrail, sem o carimbo de alergia. O recorte da trilha
+        # tem 200 caracteres e o carimbo ocupa ~130 deles, sobrando um terço para o que o
+        # modelo de fato respondeu — e gasto justamente com a parte determinística, que
+        # `patient_id` mais o prontuário reconstroem inteira. As alergias alertadas vão em
+        # campo próprio, que ainda deixa a trilha filtrável por "houve alerta".
         self.audit_logger.log(
             query=pergunta,
-            response=resposta,
+            response=resultado.resposta,
             patient_id=patient_id,
             source=fonte,
             guardrail_triggered=resultado.guardrail_triggered,
@@ -509,6 +557,7 @@ class MedicalAssistant:
             # contraditórias sobre a mesma resposta, e a auditoria sem como saber qual vale.
             tem_fonte=fonte is not None,
             motivos=resultado.motivos,
+            alergias_alertadas=tuple(alergias_alertadas),
         )
 
         return {
@@ -516,7 +565,7 @@ class MedicalAssistant:
             "source": fonte,
             "guardrail_triggered": resultado.guardrail_triggered,
             "patient_context_used": bool(patient_id),
-            "alergias_alertadas": alergias_na_pergunta,
+            "alergias_alertadas": alergias_alertadas,
         }
 
 

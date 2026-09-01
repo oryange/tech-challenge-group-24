@@ -25,6 +25,7 @@ CAMPOS_OBRIGATORIOS = {
     "guardrail_triggered",
     "tem_fonte",
     "motivos",
+    "alergias_alertadas",
 }
 
 
@@ -198,6 +199,112 @@ def test_trilha_e_diretorio_nao_ficam_legiveis_por_terceiros(tmp_path):
     # Só o dono. O arquivo guarda pergunta em texto livre e recorte de resposta clínica.
     assert destino.stat().st_mode & 0o777 == MODO_ARQUIVO
     assert destino.parent.stat().st_mode & 0o777 == MODO_DIRETORIO
+
+
+def test_aperta_o_diretorio_que_ja_existia(tmp_path):
+    # O caso padrão do projeto: `logs/` é versionado (`logs/.gitkeep`) e existe desde o clone
+    # com 0755. O `exist_ok=True` do `mkdir` devolve sem tocar na permissão, e `MODO_DIRETORIO`
+    # não valia justamente onde a trilha de verdade é escrita.
+    destino = tmp_path / "ja_existe"
+    destino.mkdir(mode=0o755)
+
+    AuditLogger(destino / "audit.jsonl")
+
+    assert destino.stat().st_mode & 0o777 == MODO_DIRETORIO
+
+
+def test_aperta_tambem_os_diretorios_intermediarios(tmp_path):
+    # `parents=True` cria os intermediários sem o `mode`: só o último saía 0700.
+    destino = tmp_path / "a" / "b" / "c" / "audit.jsonl"
+
+    AuditLogger(destino)
+
+    for diretorio in (tmp_path / "a", tmp_path / "a" / "b", destino.parent):
+        assert diretorio.stat().st_mode & 0o777 == MODO_DIRETORIO
+
+
+def test_nao_aperta_diretorio_compartilhado_que_nao_criamos(tmp_path):
+    # `AUDIT_LOG_PATH=/tmp/audit.jsonl` põe a folha num diretório de todo mundo. Apertá-lo
+    # derruba a máquina se houver privilégio, e explode na construção se não houver — quebrando
+    # uma configuração que funcionava. A trilha continua protegida pelo modo do arquivo.
+    compartilhado = tmp_path / "tmp_de_todos"
+    compartilhado.mkdir()
+    # `chmod` e não `mkdir(mode=...)`: o umask come o bit de escrita de terceiros.
+    compartilhado.chmod(0o777)
+
+    AuditLogger(compartilhado / "audit.jsonl")
+
+    assert compartilhado.stat().st_mode & 0o777 == 0o777
+
+
+def test_aperta_a_folha_criada_dentro_de_um_compartilhado(tmp_path):
+    # A dúvida de propriedade é só sobre o diretório que já existia. O que este construtor
+    # criou é nosso, mesmo pendurado num compartilhado.
+    compartilhado = tmp_path / "tmp_de_todos"
+    compartilhado.mkdir()
+    # `chmod` e não `mkdir(mode=...)`: o umask come o bit de escrita de terceiros.
+    compartilhado.chmod(0o777)
+    destino = compartilhado / "trilha" / "audit.jsonl"
+
+    AuditLogger(destino)
+
+    assert destino.parent.stat().st_mode & 0o777 == MODO_DIRETORIO
+    assert compartilhado.stat().st_mode & 0o777 == 0o777
+
+
+def test_chmod_impossivel_avisa_em_vez_de_derrubar(tmp_path, monkeypatch):
+    # Perder a auditoria inteira porque não deu para endurecer a pasta troca uma perda certa
+    # por uma incerta — o conteúdo já está protegido pelo modo do arquivo.
+    def recusar(self, mode):
+        raise PermissionError("sem permissão")
+
+    monkeypatch.setattr(audit_logger_module.Path, "chmod", recusar)
+
+    with pytest.warns(UserWarning, match="restringir"):
+        logger = AuditLogger(tmp_path / "audit.jsonl")
+
+    _log(logger)
+    assert logger.log_path.exists()
+
+
+def test_source_e_anonimizado_como_o_resto_do_texto_livre(logger):
+    # O `source` é texto livre gerado pelo modelo, e a citação vem na forma ancorada que o
+    # anonimizador sabe pegar. Sem isto o mesmo trecho saía anonimizado em `response_preview`
+    # e em claro em `source`, na mesma linha do arquivo.
+    entrada = _log(logger, source="consulta do paciente Joao Souza de 12/03/2026")
+
+    assert "Joao Souza" not in entrada["source"]
+
+
+def test_source_preserva_a_data_que_torna_a_fonte_rastreavel(logger):
+    # Anonimizar a data também trocava um vazamento por uma perda: `"consulta de [DATA]"` não
+    # diz de qual consulta a resposta saiu, que é a única pergunta que este campo responde — e
+    # é o identificador que o `fonte_confere` acabou de validar. O `patient_id` já vai em claro
+    # na mesma linha, então a data não acrescenta poder de reidentificação nenhum.
+    entrada = _log(logger, source="consulta do paciente Joao Souza de 12/03/2026")
+
+    assert entrada["source"] == "consulta do paciente [PACIENTE] de 12/03/2026"
+
+
+def test_source_com_varias_datas_devolve_cada_uma_ao_seu_lugar(logger):
+    entrada = _log(logger, source="consulta de 01/02/2026 e exame de 03/04/2026")
+
+    assert entrada["source"] == "consulta de 01/02/2026 e exame de 03/04/2026"
+
+
+def test_source_com_data_extensa_falha_fechado(logger):
+    # A restauração é posicional: se uma data extensa também virou token, a contagem não bate e
+    # nada é restaurado. Perder rastreabilidade é o lado seguro de errar aqui.
+    entrada = _log(logger, source="consulta de 12 de março de 2026 e exame de 03/04/2026")
+
+    assert "03/04/2026" not in entrada["source"]
+    assert entrada["source"].count("[DATA]") == 2
+
+
+def test_source_ausente_continua_distinto_de_source_vazio(logger):
+    # `None` e `""` são conclusões diferentes numa auditoria — ver `extrair_fonte`.
+    assert _log(logger, source=None)["source"] is None
+    assert _log(logger, source="")["source"] is None
 
 
 def test_nao_reescreve_a_permissao_de_uma_trilha_existente(logger):

@@ -20,7 +20,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
-from datasets import load_dataset
 from dotenv import load_dotenv
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -74,6 +73,24 @@ def to_instruction_format(registro: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _baixar_dataset(dataset_id: str, config: str):
+    """Import tardio do `datasets`, no mesmo padrão que o `model.py` usa com o `mlx_lm`.
+
+    No topo do módulo, o `from datasets import load_dataset` fazia o ecossistema de treino da
+    HuggingFace ser exigido por quem só quer `load_jsonl`/`save_jsonl` — que é o que
+    `curator.py`, `trainer.py`, `evaluator.py` e o `synthetic_generator.py` importam daqui. Por
+    esse último a cadeia chegava ao `src.database.seed` e daí à suíte do assistente, que não
+    era nem coletada sem o `datasets` instalado: `ModuleNotFoundError` num teste que não baixa
+    dataset nenhum.
+
+    Função nomeada em vez do import solto dentro do `load_pubmedqa` porque é ela o ponto de
+    substituição nos testes — patch aqui não obriga o `datasets` a existir para mockar.
+    """
+    from datasets import load_dataset
+
+    return load_dataset(dataset_id, config)
+
+
 def load_pubmedqa(dataset_id: str = DATASET_ID, config: str = DATASET_CONFIG) -> Iterator[dict]:
     """Baixa o dataset e devolve os registros já convertidos.
 
@@ -81,7 +98,7 @@ def load_pubmedqa(dataset_id: str = DATASET_ID, config: str = DATASET_CONFIG) ->
     passariam adiante como exemplos vazios. Nos dados atuais isso não remove nada — os
     1.000 registros têm `long_answer` preenchido — mas protege contra mudança na origem.
     """
-    dataset = load_dataset(dataset_id, config)["train"]
+    dataset = _baixar_dataset(dataset_id, config)["train"]
     for registro in dataset:
         convertido = to_instruction_format(registro)
         if convertido["instruction"] and convertido["output"]:
