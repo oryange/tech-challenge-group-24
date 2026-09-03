@@ -201,16 +201,38 @@ def test_trilha_e_diretorio_nao_ficam_legiveis_por_terceiros(tmp_path):
     assert destino.parent.stat().st_mode & 0o777 == MODO_DIRETORIO
 
 
-def test_aperta_o_diretorio_que_ja_existia(tmp_path):
+def test_aperta_o_diretorio_do_projeto_que_ja_existia(tmp_path, monkeypatch):
     # O caso padrão do projeto: `logs/` é versionado (`logs/.gitkeep`) e existe desde o clone
     # com 0755. O `exist_ok=True` do `mkdir` devolve sem tocar na permissão, e `MODO_DIRETORIO`
     # não valia justamente onde a trilha de verdade é escrita.
-    destino = tmp_path / "ja_existe"
+    #
+    # A `RAIZ` é reapontada porque o critério de "nosso" é estar dentro dela: sem isso o teste
+    # mediria um diretório de propósito geral, que é exatamente o que **não** deve ser apertado.
+    monkeypatch.setattr(audit_logger_module, "RAIZ", tmp_path.resolve())
+    destino = tmp_path / "logs"
     destino.mkdir(mode=0o755)
 
     AuditLogger(destino / "audit.jsonl")
 
     assert destino.stat().st_mode & 0o777 == MODO_DIRETORIO
+
+
+@pytest.mark.parametrize("nome_da_folha", ["home_do_usuario", "raiz_do_repo"])
+def test_nao_aperta_diretorio_nosso_de_proposito_geral(tmp_path, monkeypatch, nome_da_folha):
+    # A primeira versão excluía o gravável por todos e o de outro dono — e "nosso e não
+    # gravável por todos" descreve tanto o `logs/` quanto a `$HOME` e a raiz do repositório.
+    # Medido, `AUDIT_LOG_PATH=~/audit.jsonl` apertava a home e `AUDIT_LOG_PATH=audit.jsonl`
+    # apertava a raiz do repo, sem aviso, só por instanciar o assistente.
+    folha = tmp_path / nome_da_folha
+    folha.mkdir(mode=0o755)
+    (folha / "arquivo_sem_relacao.txt").write_text("nada a ver com a trilha", encoding="utf-8")
+    # A folha é a própria `RAIZ` no caso da raiz do repo, e está fora dela no caso da home.
+    raiz = folha if nome_da_folha == "raiz_do_repo" else tmp_path / "repo"
+    monkeypatch.setattr(audit_logger_module, "RAIZ", raiz.resolve())
+
+    AuditLogger(folha / "audit.jsonl")
+
+    assert folha.stat().st_mode & 0o777 == 0o755
 
 
 def test_aperta_tambem_os_diretorios_intermediarios(tmp_path):
@@ -260,8 +282,10 @@ def test_chmod_impossivel_avisa_em_vez_de_derrubar(tmp_path, monkeypatch):
 
     monkeypatch.setattr(audit_logger_module.Path, "chmod", recusar)
 
+    # Diretório que o construtor cria, para cair no ramo que aperta sem depender do critério
+    # de propriedade — o que se mede aqui é o tratamento da falha, não o critério.
     with pytest.warns(UserWarning, match="restringir"):
-        logger = AuditLogger(tmp_path / "audit.jsonl")
+        logger = AuditLogger(tmp_path / "nova" / "audit.jsonl")
 
     _log(logger)
     assert logger.log_path.exists()

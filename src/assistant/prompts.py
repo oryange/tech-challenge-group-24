@@ -92,46 +92,97 @@ _NOMES_DE_BLOCO = ("contexto_do_paciente", "pergunta_do_medico", "historico_da_c
 # mesmo erro que o docstring deste módulo aponta na escolha do marcador — confiar na grafia
 # ser rara —, uma camada abaixo.
 #
-# Os quantificadores são possessivos (`\s*+`, Python 3.11+) e a cauda é limitada a 64
-# caracteres. Sem isso o padrão é **quadrático**, não linear: dois `\s*` adjacentes separados
-# por um átomo opcional (`/?`) são ambíguos, e numa falha de casamento o motor testa todas as
-# partições do espaço em branco — medido, `"<" + " " * 16000` levava 2,5 s. A ambiguidade
-# entre quantificadores vizinhos pesa mesmo sem aninhamento, e `build_prompt` é API pública
-# sem teto de tamanho, com o contexto vindo do banco.
+# Os quantificadores de espaço em branco são possessivos (`\s*+`, Python 3.11+). Sem isso o
+# padrão é **quadrático**, não linear: dois `\s*` adjacentes separados por um átomo opcional
+# (`/?`) são ambíguos, e numa falha de casamento o motor testa todas as partições do espaço em
+# branco — medido, `"<" + " " * 16000` levava 2,5 s. A ambiguidade entre quantificadores
+# vizinhos pesa mesmo sem aninhamento, e `build_prompt` é API pública sem teto de tamanho, com
+# o contexto vindo do banco.
+#
+# A cauda tem **duas** partes, e é preciso as duas. `[^>]{0,64}?` cobre atributo e `/` posposto;
+# o `\s*+` depois dela cobre a tag padeada. Com só a cauda limitada, `</pergunta_do_medico` +
+# 80 espaços + `>` escapava do casamento — mais estreito que o `\s*>` que a cauda substituiu, e
+# a regressão saía justamente na variante mais fácil de escrever à mão. O teto de 64 continua
+# valendo para o que não é espaço em branco, que é onde ele evita casamento longo demais.
 _DELIMITADORES = re.compile(
-    rf"<\s*+(/?)\s*+({'|'.join(_NOMES_DE_BLOCO)})\b[^>]{{0,64}}>",
+    rf"<\s*+(/?)\s*+({'|'.join(_NOMES_DE_BLOCO)})\b([^>]{{0,64}}?)\s*+>",
     re.IGNORECASE,
 )
 
 
 def _desarmar(casamento: re.Match[str]) -> str:
-    """Devolve sempre a forma canônica `(/pergunta_do_medico)`, não a variante recebida.
+    """Neutraliza a tag preservando o texto que vinha dentro dela.
 
-    Normalizar aqui é o que garante que a saída não carregue de volta a caixa, o espaçamento
-    nem os atributos que alguém usou para tentar — o que sobra no prompt é uma marca uniforme,
-    fácil de reconhecer tanto pelo modelo quanto por quem for ler a trilha depois.
+    `<CONTEXTO_DO_PACIENTE x>` vira `(contexto_do_paciente x)`: a caixa e o espaçamento saem
+    normalizados, então o que sobra no prompt é uma marca uniforme, fácil de reconhecer tanto
+    pelo modelo quanto por quem for ler a trilha depois.
+
+    A **cauda é emitida de volta**, e isso não é detalhe: ela é `[^>]{0,64}`, casa qualquer
+    coisa que não seja `>`, e descartá-la apagava texto clínico legítimo. Medido, `"PA
+    <contexto_do_paciente 140x90 mmHg e FC 88> estavel"` saía como `"PA (contexto_do_paciente)
+    estavel"` — os sinais vitais sumiam, e o contexto do banco passa por aqui antes de chegar
+    ao modelo. Contradizia o "nenhuma ponta de texto se cola a outra" que este módulo promete,
+    pela mesma razão que a troca é por parêntese e não por remoção: neutralizar a fronteira não
+    é licença para comer o dado.
     """
-    return f"({casamento.group(1)}{casamento.group(2).lower()})"
+    return f"({casamento.group(1)}{casamento.group(2).lower()}{casamento.group(3)})"
+
+
+# Confusáveis de `<` e `>`, um a um e não por normalização de compatibilidade. A lista é a de
+# sinais de ângulo que um modelo lê como fronteira de bloco: largura completa, forma pequena,
+# aspa angular simples, ângulo CJK, ângulo matemático e os ornamentos.
+_CONFUSAVEIS_DE_ANGULO = str.maketrans(
+    {
+        "＜": "<",  # FULLWIDTH LESS-THAN SIGN
+        "＞": ">",  # FULLWIDTH GREATER-THAN SIGN
+        "﹤": "<",  # SMALL LESS-THAN SIGN
+        "﹥": ">",  # SMALL GREATER-THAN SIGN
+        "‹": "<",  # SINGLE LEFT-POINTING ANGLE QUOTATION MARK
+        "›": ">",  # SINGLE RIGHT-POINTING ANGLE QUOTATION MARK
+        "〈": "<",  # LEFT ANGLE BRACKET
+        "〉": ">",  # RIGHT ANGLE BRACKET
+        "《": "<",  # LEFT DOUBLE ANGLE BRACKET
+        "》": ">",  # RIGHT DOUBLE ANGLE BRACKET
+        "⟨": "<",  # MATHEMATICAL LEFT ANGLE BRACKET
+        "⟩": ">",  # MATHEMATICAL RIGHT ANGLE BRACKET
+        "〈": "<",  # LEFT-POINTING ANGLE BRACKET
+        "〉": ">",  # RIGHT-POINTING ANGLE BRACKET
+        "❬": "<",  # MEDIUM LEFT-POINTING ANGLE BRACKET ORNAMENT
+        "❭": ">",  # MEDIUM RIGHT-POINTING ANGLE BRACKET ORNAMENT
+        "❮": "<",  # HEAVY LEFT-POINTING ANGLE QUOTATION MARK ORNAMENT
+        "❯": ">",  # HEAVY RIGHT-POINTING ANGLE QUOTATION MARK ORNAMENT
+        "˂": "<",  # MODIFIER LETTER LEFT ARROWHEAD
+        "˃": ">",  # MODIFIER LETTER RIGHT ARROWHEAD
+    }
+)
 
 
 def _achatar_unicode(texto: str) -> str:
-    """Reduz look-alikes e caracteres invisíveis à forma que o padrão sabe casar.
+    """Reduz look-alikes de `<`/`>` e caracteres invisíveis à forma que o padrão sabe casar.
 
     Duas famílias de variante sobreviviam ao casamento e eram lidas como fronteira de bloco
     assim mesmo, porque quem lê é um modelo de linguagem e não um parser de XML:
 
     - **Look-alike Unicode.** `＜/pergunta_do_medico＞` usa FULLWIDTH LESS-THAN SIGN (U+FF1C) no
-      lugar de `<`. O `NFKC` mapeia a forma de compatibilidade para o ASCII correspondente.
+      lugar de `<`. O `_CONFUSAVEIS_DE_ANGULO` mapeia esse punhado de sinais para o ASCII.
     - **Caracteres de formatação.** `</pergunta_do_medico​>` traz um zero-width space
       entre o nome e o `>`. Eles não têm largura na tela nem valor semântico no dado clínico,
       e a categoria `Cf` os isola sem tocar em acento nem em pontuação.
 
-    O `NFKC` é aplicado ao texto inteiro, não só ao trecho da tag, porque o casamento e o
-    resultado precisam ser o mesmo texto. Ele mexe em coisas além do ataque (liga tipográfica,
-    expoente, sinal de micro), o que em dado clínico é normalização desejável — o que ele não
-    faz é alterar acentuação, que é a única perda que importaria aqui.
+    O achatamento é **dirigido aos confusáveis de ângulo**, e não um `NFKC` no texto inteiro.
+    O `NFKC` fechava as mesmas variantes, mas reescrevia a carga clínica junto, porque não
+    distingue look-alike de tag de notação com significado:
+
+        'Sensibilidade 10⁻⁶ mol' -> 'Sensibilidade 10−6 mol'   (expoente vira subtração)
+        'Volume 5 cm³'           -> 'Volume 5 cm3'
+        'Dose ½ comprimido'      -> 'Dose 1⁄2 comprimido'      (U+2044, que não é `/`)
+
+    O primeiro é o que decide: `10⁻⁶` virar `10−6` faz o modelo ler uma subtração onde havia
+    uma ordem de grandeza, e é o contexto do paciente que passa por aqui. Só os confusáveis de
+    `<` e `>` precisam ser achatados para o casamento funcionar — o resto do texto não é do
+    escopo desta função, e mexer nele é dano sem contrapartida.
     """
-    achatado = unicodedata.normalize("NFKC", texto)
+    achatado = texto.translate(_CONFUSAVEIS_DE_ANGULO)
     return "".join(c for c in achatado if unicodedata.category(c) != "Cf")
 
 
@@ -150,13 +201,20 @@ def neutralizar_delimitadores(texto: str) -> str:
     substitui por marcador em vez de apagar.
 
     O texto passa antes por `_achatar_unicode`, que fecha as variantes que o padrão sozinho
-    não vê: look-alike de largura completa e caractere invisível dentro da tag.
+    não vê: look-alike de sinal de ângulo e caractere invisível dentro da tag.
+
+    A tag é neutralizada, e o texto que vinha dentro dela é devolvido — ver `_desarmar`.
 
     O padrão é linear na entrada, e é preciso quantificador possessivo para que seja — ver o
-    comentário de `_DELIMITADORES`. Alcance declarado: o que resta de fora é a tag partida por
-    caractere visível (`</pergunta_do_ medico>`), que sai do casamento por construção. Como a
-    propriedade 2 do módulo (o rodapé imposto pelo `apply_guardrails`) não depende de nada
-    disso, uma fuga aqui não vira autoridade para prescrever.
+    comentário de `_DELIMITADORES`. Alcance declarado, duas coisas de fora, as duas por
+    construção do padrão:
+
+    - a tag partida por caractere visível (`</pergunta_do_ medico>`);
+    - a tag com mais de 64 caracteres **que não sejam espaço em branco** entre o nome do bloco
+      e o `>` — o teto da cauda. Espaço em branco não conta, por mais longo que seja.
+
+    Como a propriedade 2 do módulo (o rodapé imposto pelo `apply_guardrails`) não depende de
+    nada disso, uma fuga aqui não vira autoridade para prescrever.
     """
     return _DELIMITADORES.sub(_desarmar, _achatar_unicode(texto))
 

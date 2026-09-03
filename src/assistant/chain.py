@@ -129,16 +129,41 @@ _TERMOS = re.compile(r"[^\W_]+", re.UNICODE)
 # consegue inventar com aparência de legítimos — o resto da citação é prosa, que não dá para
 # conferir por comparação literal sem barrar paráfrase correta.
 #
-# `IGNORECASE` porque a comparação adiante é feita sobre a forma de `_normalizar`, que baixa
-# tudo para minúscula. Sem ele a detecção era sensível à caixa e a comparação não, e a fresta
-# invertia o resultado da função: `[Fonte: protocolo cid j99]` não casava identificador nenhum,
-# caía no `if not identificadores` e a citação fabricada entrava na trilha como conferida — sem
-# nem o aviso que denunciaria. Errar para o lado de casar demais é o lado certo aqui: um falso
-# identificador na prosa faz a fonte ser conferida contra o contexto, não descartada de saída.
+# O CID tem **dois** ramos, e é preciso os dois. Um `IGNORECASE` no padrão inteiro fechava a
+# fresta de caixa — `[Fonte: protocolo cid j99]` não casava identificador nenhum, caía no `if
+# not identificadores` e a citação fabricada entrava na trilha como conferida, sem nem o aviso
+# que denunciaria — mas abria outra: `\b[A-Z]\d{2}\b` insensível à caixa casa token clínico
+# comum. Medido, `vitamina b12`, `leito a12`, `escala k10` e `sala c04` viravam identificador,
+# e como o `fonte_confere` exige que **todos** apareçam no contexto, `[Fonte: exames de vitamina
+# b12]` contra um contexto que escreve "vitamina B 12" caía no `warnings.warn` e gravava `source:
+# null` para uma citação válida. Aqui casar demais não é o lado seguro: o custo é perder dado de
+# explicabilidade, não ganhar.
+#
+# Então: código em caixa alta vale sozinho (é como o `SYSTEM_PROMPT` manda citar, e é o que o
+# modelo real emite — `[Fonte: protocolo G43]`), e em minúscula vale quando ancorado na pista
+# `cid`. O `(?-i:[A-Z])` (Python 3.11+) mantém só esse ramo sensível à caixa, com o `IGNORECASE`
+# valendo para a pista. Os grupos são nomeados porque a alternação com captura muda o que o
+# `findall` devolve — ver `fonte_confere`, que por isso usa `finditer`.
 _IDENTIFICADOR_DE_FONTE = re.compile(
-    r"\d{2}/\d{2}/\d{4}|\b[A-Z]\d{2}(?:\.\d+)?\b",
+    r"(?P<data>\d{2}/\d{2}/\d{4})"
+    r"|\bcid\b\W{0,3}(?P<cid_com_dica>[a-z]\d{2}(?:\.\d+)?)\b"
+    r"|\b(?P<cid_em_caixa>(?-i:[A-Z])\d{2}(?:\.\d+)?)\b",
     re.IGNORECASE,
 )
+
+
+def _identificadores_de_fonte(fonte: str) -> list[str]:
+    """Datas e códigos CID citados na fonte, sem a pista `cid` que ancorou o código.
+
+    `finditer` e não `findall`: com a alternação de grupos nomeados o `findall` devolveria uma
+    tupla por casamento, com vazio nos ramos que não casaram. O que interessa é o único grupo
+    que casou, e é ele que vai à comparação — a pista fica fora porque o contexto pode escrever
+    `CID J45` onde a fonte escreveu `cid: j45`, e a pontuação faria a comparação literal falhar.
+    """
+    return [
+        next(grupo for grupo in casamento.groups() if grupo)
+        for casamento in _IDENTIFICADOR_DE_FONTE.finditer(fonte)
+    ]
 
 
 def _normalizar(texto: str) -> str:
@@ -303,6 +328,12 @@ def fonte_confere(fonte: str | None, contexto: str | None) -> bool:
     como "exames do paciente" não tem identificador e passa — não há o que conferir, e barrar
     a forma genérica só empurraria o modelo a citar menos.
 
+    O que conta como identificador está em `_IDENTIFICADOR_DE_FONTE`, e o alcance é declarado
+    lá: CID em minúscula só é reconhecido quando ancorado na pista `cid`. `[Fonte: protocolo
+    g43]` passa sem conferência, e isso é a escolha certa entre as duas maneiras de errar —
+    tratar `b12` e `c04` como código inventado reprovava citação legítima e apagava o `source`
+    da trilha, que é dado de explicabilidade.
+
     O que isto **não** faz, e importa não confundir: confere que a fonte *existe*, não que a
     afirmação saiu dela. Uma resposta que cita uma consulta real e atribui a ela um conteúdo
     que não estava lá continua passando. Verificar isso é atribuição de conteúdo à fonte, um
@@ -310,7 +341,7 @@ def fonte_confere(fonte: str | None, contexto: str | None) -> bool:
     """
     if not fonte:
         return False
-    identificadores = _IDENTIFICADOR_DE_FONTE.findall(fonte)
+    identificadores = _identificadores_de_fonte(fonte)
     if not identificadores:
         return True
     alvo = _normalizar(contexto or "")
@@ -538,14 +569,20 @@ class MedicalAssistant:
         # copiá-lo para um arquivo que é aberto no notebook e gravado no vídeo de entrega
         # espalharia dado clínico sem responder nenhuma pergunta de auditoria a mais.
         #
-        # A resposta gravada é a do guardrail, sem o carimbo de alergia. O recorte da trilha
-        # tem 200 caracteres e o carimbo ocupa ~130 deles, sobrando um terço para o que o
-        # modelo de fato respondeu — e gasto justamente com a parte determinística, que
-        # `patient_id` mais o prontuário reconstroem inteira. As alergias alertadas vão em
-        # campo próprio, que ainda deixa a trilha filtrável por "houve alerta".
+        # A resposta gravada é a `limpa`: o texto do modelo já cortado e deduplicado, sem
+        # nenhuma das marcas que o fluxo acrescenta depois. Nem o carimbo de alergia, nem o
+        # rodapé de validação, nem o `AVISO_PRESCRICAO`.
+        #
+        # O motivo é o mesmo para as três, e é o recorte de 200 caracteres: o carimbo de
+        # alergia ocupava ~130 e o `AVISO_PRESCRICAO` ocupa 161, deixando 39 para o que o modelo
+        # de fato respondeu — cortados no meio da palavra. Todas as três são determinísticas e
+        # reconstruíveis: as duas do guardrail a partir de `guardrail_triggered` mais `motivos`,
+        # o carimbo a partir de `alergias_alertadas` mais o prontuário. Gastar dois terços da
+        # trilha com o que já está registrado em campo próprio é gastar o recorte com a única
+        # parte que não precisava dele.
         self.audit_logger.log(
             query=pergunta,
-            response=resultado.resposta,
+            response=limpa,
             patient_id=patient_id,
             source=fonte,
             guardrail_triggered=resultado.guardrail_triggered,

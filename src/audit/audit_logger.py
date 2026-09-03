@@ -134,6 +134,37 @@ def _anonimizar_conversa(texto: str) -> str:
     return resultado
 
 
+def _e_diretorio_do_projeto(diretorio: Path) -> bool:
+    """Diz se um diretório que já existia é do projeto — o único que pode ser apertado.
+
+    "Nosso" precisa ser **dentro da `RAIZ` e não a própria `RAIZ`**, e não "do nosso uid e não
+    gravável por todos", que foi a primeira tentativa. Essa heurística descrevia bem o `logs/`,
+    mas descrevia igualmente bem a `$HOME` e a raiz do repositório — que também são nossas e
+    também não são graváveis por todos, e são justamente os dois diretórios em que a nossa vida
+    inteira mora. Medido: `AUDIT_LOG_PATH=~/audit.jsonl` apertava a home e
+    `AUDIT_LOG_PATH=audit.jsonl` apertava a raiz do repositório, sem aviso, só por instanciar o
+    assistente.
+
+    O que estava faltando à exclusão não era "de outro dono", era "nosso e compartilhado com o
+    resto da nossa vida". Um allowlist do que o projeto possui cobre as duas coisas de uma vez:
+    o `logs/` continua sendo apertado, e nenhum diretório de propósito geral entra. Um denylist
+    de `{home, raiz}` teria movido o defeito para `~/Documents` em vez de fechá-lo.
+
+    A checagem de propriedade continua, por cima: dentro da `RAIZ` um diretório gravável por
+    todos ou de outro `st_uid` é anomalia, e apertá-lo mexeria em algo que não montamos.
+    """
+    try:
+        alvo = diretorio.resolve()
+        info = diretorio.stat()
+    except OSError:
+        return False
+    if alvo == RAIZ or not alvo.is_relative_to(RAIZ):
+        return False
+    compartilhado = bool(info.st_mode & 0o002)
+    de_outro_dono = hasattr(os, "getuid") and info.st_uid != os.getuid()
+    return not (compartilhado or de_outro_dono)
+
+
 def _apertar_diretorios(folha: Path, criados: list[Path]) -> None:
     """Aplica `MODO_DIRETORIO` no diretório da trilha e nos que acabaram de ser criados.
 
@@ -147,10 +178,10 @@ def _apertar_diretorios(folha: Path, criados: list[Path]) -> None:
     que o problema que este passo resolve: com `AUDIT_LOG_PATH=/tmp/audit.jsonl` a folha é o
     `/tmp`, e um `chmod 0700` ali derruba a máquina inteira se tiver privilégio para acontecer
     — e explode na construção se não tiver, quebrando uma configuração que antes funcionava.
-    Então a folha só é apertada quando é nossa: o diretório compartilhado se identifica por ser
-    gravável por todos (é o que o sticky bit do `/tmp` existe para tornar seguro), e o de outro
-    dono se identifica pelo `st_uid`. Os que este construtor criou não passam por essa checagem
-    porque sobre eles não há dúvida de propriedade.
+    Então um diretório que já existia só é apertado quando é do projeto — ver
+    `_e_diretorio_do_projeto`, que é onde mora o critério e o porquê dele. Os que este
+    construtor criou não passam pela checagem, porque sobre eles não há dúvida de propriedade:
+    não existiam um instante atrás.
 
     Falha de `chmod` avisa em vez de derrubar. A permissão do diretório é defesa em
     profundidade — o `touch(mode=MODO_ARQUIVO)` já protege o conteúdo —, e recusar a escrever
@@ -158,15 +189,8 @@ def _apertar_diretorios(folha: Path, criados: list[Path]) -> None:
     por uma incerta.
     """
     for diretorio in dict.fromkeys([*criados, folha]):
-        if diretorio not in criados:
-            try:
-                info = diretorio.stat()
-            except OSError:
-                continue
-            compartilhado = bool(info.st_mode & 0o002)
-            de_outro_dono = hasattr(os, "getuid") and info.st_uid != os.getuid()
-            if compartilhado or de_outro_dono:
-                continue
+        if diretorio not in criados and not _e_diretorio_do_projeto(diretorio):
+            continue
         try:
             diretorio.chmod(MODO_DIRETORIO)
         except OSError as erro:
@@ -294,6 +318,13 @@ class AuditLogger:
         motivo: o carimbo determinístico do PR 07 ocupa dois terços do recorte de auditoria com
         um texto reconstruível a partir de `patient_id` mais o prontuário. Em campo separado
         ele não come o recorte e ainda deixa a trilha filtrável por "houve alerta".
+
+        O mesmo vale para as marcas do guardrail, e é o chamador quem decide: o `ask` do PR 07
+        passa em `response` o texto do modelo **antes** do carimbo de alergia, do rodapé de
+        validação e do `AVISO_PRESCRICAO`. Os três são determinísticos e este `log()` já recebe
+        o que os reconstrói (`guardrail_triggered`, `motivos`, `alergias_alertadas`); só o
+        `AVISO_PRESCRICAO` tem 161 dos 200 caracteres do recorte. Quem chamar direto e passar a
+        resposta já marcada não erra nada — perde recorte.
         """
         entrada = {
             # Milissegundos, não segundos: duas interações da mesma sessão cabem no mesmo
