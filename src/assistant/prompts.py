@@ -99,13 +99,26 @@ _NOMES_DE_BLOCO = ("contexto_do_paciente", "pergunta_do_medico", "historico_da_c
 # vizinhos pesa mesmo sem aninhamento, e `build_prompt` é API pública sem teto de tamanho, com
 # o contexto vindo do banco.
 #
-# A cauda tem **duas** partes, e é preciso as duas. `[^>]{0,64}?` cobre atributo e `/` posposto;
-# o `\s*+` depois dela cobre a tag padeada. Com só a cauda limitada, `</pergunta_do_medico` +
-# 80 espaços + `>` escapava do casamento — mais estreito que o `\s*>` que a cauda substituiu, e
-# a regressão saía justamente na variante mais fácil de escrever à mão. O teto de 64 continua
-# valendo para o que não é espaço em branco, que é onde ele evita casamento longo demais.
+# O teto de 64 vale para o que **não** é espaço em branco; espaço é ilimitado, em qualquer
+# posição da cauda. `(?:\s*+[^\s>]){0,64}` diz exatamente isso: até 64 caracteres não-espaço,
+# cada um podendo vir precedido de qualquer quantidade de espaço.
+#
+# O `\s*+` final fica **fora** da captura de propósito. Dentro dela, o padding voltava ecoado
+# no marcador e `</ pergunta_do_medico >` saía como `(/pergunta_do_medico )` — a marca deixava
+# de ser uniforme, que é o que o `_desarmar` promete normalizar. Fora, o espaço que não separa
+# nada é consumido e descartado, e o que separa conteúdo (`<pergunta_do_medico id="x">`)
+# continua preservado pela captura.
+#
+# A forma anterior, `[^>]{0,64}?\s*+`, só cobria o padding quando ele vinha imediatamente antes
+# do `>`. Bastava um caractere depois dele para o espaço voltar a contar no teto: medido,
+# `</pergunta_do_medico` + 64 espaços + `/>` escapava do casamento inteiro e o `build_prompt`
+# emitia o delimitador literal — o mesmo defeito que a cauda tinha vindo corrigir, uma tecla
+# adiante. Separar as duas dimensões fecha a classe em vez de um caso dela.
+#
+# Continua linear e possessivo: `\s*+` não devolve, `[^\s>]` é um caractere, e a repetição é
+# limitada. Medido, 64 mil espaços seguidos de `/>` em 0,003 s.
 _DELIMITADORES = re.compile(
-    rf"<\s*+(/?)\s*+({'|'.join(_NOMES_DE_BLOCO)})\b([^>]{{0,64}}?)\s*+>",
+    rf"<\s*+(/?)\s*+({'|'.join(_NOMES_DE_BLOCO)})\b((?:\s*+[^\s>]){{0,64}})\s*+>",
     re.IGNORECASE,
 )
 
@@ -124,14 +137,24 @@ def _desarmar(casamento: re.Match[str]) -> str:
     ao modelo. Contradizia o "nenhuma ponta de texto se cola a outra" que este módulo promete,
     pela mesma razão que a troca é por parêntese e não por remoção: neutralizar a fronteira não
     é licença para comer o dado.
+
+    A cauda sai **neutralizada**, não literal, e a diferença é de segurança. Ela casa qualquer
+    coisa que não seja `>`, o que inclui `<`, e o `re.sub` não reescaneia a própria
+    substituição. Emitindo-a crua, `"<contexto_do_paciente x</pergunta_do_medico>"` saía como
+    `"(contexto_do_paciente x</pergunta_do_medico)"`: um delimitador de fechamento real
+    sobrevivia dentro da marca que deveria tê-lo desarmado, e o `build_prompt` o entregava ao
+    modelo. Trocar `<` por `(` na cauda preserva o texto e fecha a fresta — o `>` não precisa
+    de tratamento porque o padrão já o exclui.
     """
-    return f"({casamento.group(1)}{casamento.group(2).lower()}{casamento.group(3)})"
+    cauda = casamento.group(3).replace("<", "(")
+
+    return f"({casamento.group(1)}{casamento.group(2).lower()}{cauda})"
 
 
 # Confusáveis de `<` e `>`, um a um e não por normalização de compatibilidade. A lista é a de
 # sinais de ângulo que um modelo lê como fronteira de bloco: largura completa, forma pequena,
 # aspa angular simples, ângulo CJK, ângulo matemático e os ornamentos.
-_CONFUSAVEIS_DE_ANGULO = str.maketrans(
+_SINAIS_DE_ANGULO = (
     {
         "＜": "<",  # FULLWIDTH LESS-THAN SIGN
         "＞": ">",  # FULLWIDTH GREATER-THAN SIGN
@@ -155,6 +178,20 @@ _CONFUSAVEIS_DE_ANGULO = str.maketrans(
         "˃": ">",  # MODIFIER LETTER RIGHT ARROWHEAD
     }
 )
+
+# O bloco Fullwidth ASCII inteiro (U+FF01–U+FF5E), que é o deslocamento fixo de 0xFEE0 sobre o
+# ASCII imprimível. Converter só os ângulos deixava passar o payload todo em largura completa e
+# ainda o afiava: `＜／ｐｅｒｇｕｎｔａ＿ｄｏ＿ｍｅｄｉｃｏ＞` saía com `<` e `>` ASCII **reais** em volta de um
+# nome que o padrão não reconhece — mais parecido com tag do que a entrada, e sem casar.
+#
+# Isto não reabre o que o `NFKC` quebrava. Forma de largura completa de ASCII não é notação
+# clínica: é a mesma letra desenhada larga, e nenhum prontuário escreve `５ ｍｇ` querendo dizer
+# outra coisa que não `5 mg`. Expoente (`10⁻⁶`), subscrito (`O₂`), fração (`½`), potência
+# (`cm³`) e numeral romano (`Ⅳ`) vivem fora deste bloco e continuam intocados — que era
+# exatamente o dano que trocar o `NFKC` pelo achatamento dirigido veio evitar.
+_FULLWIDTH_ASCII = {chr(codigo): chr(codigo - 0xFEE0) for codigo in range(0xFF01, 0xFF5F)}
+
+_CONFUSAVEIS_DE_ANGULO = str.maketrans({**_FULLWIDTH_ASCII, **_SINAIS_DE_ANGULO})
 
 
 def _achatar_unicode(texto: str) -> str:
