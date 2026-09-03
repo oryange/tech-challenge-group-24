@@ -46,6 +46,7 @@ do repositório, e o que for exibido no notebook ou no vídeo precisa ser confer
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -206,6 +207,26 @@ def _apertar_diretorios(folha: Path, criados: list[Path]) -> None:
 # aparecer o resultado é ela continuar redigida — o lado seguro de errar aqui.
 _DATA_RASTREAVEL = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-\d{2}\b")
 
+# Marca cada data numérica **antes** da anonimização, para que a restauração seja por posição
+# e não por contagem de `[DATA]`. A contagem tinha uma coincidência que vazava PII:
+#
+#     in : consulta de 05 de maio de 2020, prontuario 12/03/2026
+#     out: consulta de 12/03/2026, prontuario [PACIENTE_ID]     <- errado, e em claro
+#
+# A data extensa é consumida pela regra de data e vira `[DATA]`; a numérica é consumida pela
+# regra de **prontuário**, que roda antes das de data, e vira `[PACIENTE_ID]`. Aí
+# `count(TOKEN_DATA) == len(datas) == 1`, a guarda deixava passar, e o `replace` punha o número
+# de prontuário — que a anonimização acabara de redigir — em claro na posição da outra data. Um
+# identificador coberto reaparecia no disco, que é o oposto do que este módulo existe para
+# fazer, e a trilha ainda passava a afirmar a data errada.
+#
+# Marcar antes resolve os dois lados de uma vez: a sentinela sobrevive à anonimização quando a
+# data era livre (nenhuma regra a reconhece: são 12 dígitos seguidos, sem separador de data, e
+# os lookarounds de `_PII_CONVERSA` exigem exatamente 10 ou 11), e **desaparece** quando a data
+# servia de identificador ancorado, porque a regra da âncora a come junto com a pista. Sentinela
+# que sumiu é a colisão se denunciando, e aí nada é restaurado.
+_SENTINELA_DE_DATA = "400289220{:03d}"
+
 
 def _anonimizar_fonte(texto: str) -> str:
     """Anonimiza a citação de fonte, mas devolve as datas ao lugar.
@@ -227,16 +248,28 @@ def _anonimizar_fonte(texto: str) -> str:
     reidentificação nenhum a quem já tem o token do paciente e o banco. O que a anonimização
     precisa cobrir aqui é o nome, e esse continua coberto.
 
-    A restauração é posicional e falha fechado: se a contagem de `[DATA]` no texto anonimizado
-    não bater com a de datas numéricas do original — o que acontece quando uma data extensa
-    também virou token —, nada é restaurado e tudo continua redigido.
+    A restauração é **posicional e falha fechado**, e as duas coisas dependem de a data ser
+    marcada antes da anonimização, não reconhecida depois — ver `_SENTINELA_DE_DATA`.
     """
-    anonimizado = _anonimizar_conversa(texto)
-    datas = _DATA_RASTREAVEL.findall(texto)
-    if not datas or anonimizado.count(TOKEN_DATA) != len(datas):
-        return anonimizado
-    for data in datas:
-        anonimizado = anonimizado.replace(TOKEN_DATA, data, 1)
+    datas = [casamento.group() for casamento in _DATA_RASTREAVEL.finditer(texto)]
+    if not datas:
+        return _anonimizar_conversa(texto)
+
+    contador = itertools.count()
+    marcado = _DATA_RASTREAVEL.sub(
+        lambda _: _SENTINELA_DE_DATA.format(next(contador)), texto
+    )
+    anonimizado = _anonimizar_conversa(marcado)
+
+    sentinelas = [_SENTINELA_DE_DATA.format(indice) for indice in range(len(datas))]
+    if any(anonimizado.count(sentinela) != 1 for sentinela in sentinelas):
+        # Alguma data foi consumida por uma regra que não é de data. Nada é restaurado, e o
+        # texto volta a ser anonimizado a partir do original — o `marcado` não serve como saída,
+        # porque devolveria a sentinela ao arquivo.
+        return _anonimizar_conversa(texto)
+
+    for sentinela, data in zip(sentinelas, datas):
+        anonimizado = anonimizado.replace(sentinela, data)
     return anonimizado
 
 

@@ -316,13 +316,37 @@ def test_source_com_varias_datas_devolve_cada_uma_ao_seu_lugar(logger):
     assert entrada["source"] == "consulta de 01/02/2026 e exame de 03/04/2026"
 
 
-def test_source_com_data_extensa_falha_fechado(logger):
-    # A restauração é posicional: se uma data extensa também virou token, a contagem não bate e
-    # nada é restaurado. Perder rastreabilidade é o lado seguro de errar aqui.
+def test_source_com_data_extensa_nao_desloca_a_numerica(logger):
+    # A extensa continua redigida (é o alcance declarado de `_DATA_RASTREAVEL`) e a numérica
+    # volta ao **seu** lugar. Marcando antes da anonimização a posição é a de origem; com a
+    # guarda por contagem, ou nada era restaurado, ou a data ia para a posição errada.
     entrada = _log(logger, source="consulta de 12 de março de 2026 e exame de 03/04/2026")
 
-    assert "03/04/2026" not in entrada["source"]
-    assert entrada["source"].count("[DATA]") == 2
+    assert entrada["source"] == "consulta de [DATA] e exame de 03/04/2026"
+
+
+def test_source_nao_restaura_data_que_era_identificador_ancorado(logger):
+    # O defeito que este teste fecha era vazamento, não só data errada: a numérica é consumida
+    # pela regra de **prontuário** e vira `[PACIENTE_ID]`; a extensa vira `[DATA]`. A contagem
+    # coincidia em 1, a guarda deixava passar, e o `replace` punha o número de prontuário — que
+    # a anonimização acabara de redigir — em claro na posição da outra data.
+    entrada = _log(logger, source="consulta de 05 de maio de 2020, prontuario 12/03/2026")
+
+    assert entrada["source"] == "consulta de [DATA], prontuario [PACIENTE_ID]"
+    assert "12/03/2026" not in entrada["source"]
+
+
+def test_source_nao_deixa_a_sentinela_no_arquivo(logger):
+    # A marca é interna: nem quando a restauração acontece, nem quando ela falha fechado, a
+    # sentinela pode chegar ao disco — ela tem cara de identificador para quem lê a trilha.
+    for fonte in (
+        "consulta de 12/03/2026",
+        "prontuario 12/03/2026",
+        "consulta de 12 de março de 2026 e exame de 03/04/2026",
+    ):
+        entrada = _log(logger, source=fonte)
+
+        assert "40028922" not in entrada["source"]
 
 
 def test_source_ausente_continua_distinto_de_source_vazio(logger):
