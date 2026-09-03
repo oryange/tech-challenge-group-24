@@ -893,6 +893,11 @@ O que **não** foi corrigido, e por quê:
 Oito apontamentos, todos reproduzidos executando o branch antes de mexer. Os seis primeiros
 eram defeito de código; os dois últimos, garantia afirmada acima do que o código cumpria.
 
+> **Seis destas correções foram revisadas de novo e ajustadas no P5.** O que está descrito aqui
+> é o que foi feito nesta rodada, não o estado atual do código: a regex do identificador, o
+> achatamento Unicode, a cauda do `_DELIMITADORES`, o critério do `chmod`, a restauração de data
+> e o recorte da trilha mudaram depois. Ver P5 para o motivo de cada um.
+
 Corrigido:
 
 - **Alerta de alergia dependia de o médico já saber o alérgeno.** `alergias_citadas` recebia
@@ -995,3 +1000,102 @@ Não corrigido, e por quê:
 - [ ] **A resposta não passa por `sanitize_input` antes de entrar no histórico, a pergunta
       passa.** Assimetria real, impacto baixo: a denylist é declaradamente contornável e o
       histórico entra dentro de bloco delimitado, que é a defesa que segura.
+
+### P5 — Segunda rodada de review do PR 07: correções que as correções pediram ✅
+
+Oito apontamentos novos, e a leitura geral é que seis deles são consequência das correções do
+P4 — a regex que fechou a fresta de caixa abriu um falso positivo, a cauda que fechou o atributo
+estreitou o espaço em branco, o `NFKC` que fechou o look-alike reescreveu a notação clínica. Os
+seis reproduzem executando o branch; um deles é vazamento de PII e não o que a revisão descreveu.
+
+Corrigido:
+
+- **A cauda `[^>]{0,64}` ficou mais estreita que o `\s*>` que ela substituiu.** Medido, tag com
+  65 espaços ou mais entre o nome do bloco e o `>` escapava do casamento e o `build_prompt`
+  emitia um `</pergunta_do_medico ... >` literal dentro do bloco da pergunta. O ramo de espaço em
+  branco tinha sido *trocado* pelo de atributos, e é preciso os dois: `([^>]{0,64}?)\s*+>` — a
+  cauda limitada para o que não é espaço, o possessivo para o que é. Continua linear: 64 mil
+  espaços em 0,0026 s. Alcance declarado no docstring: mais de 64 caracteres **que não sejam
+  espaço em branco** continuam fora, por construção.
+- **O `_desarmar` descartava a cauda junto com a tag.** `"PA <contexto_do_paciente 140x90 mmHg e
+  FC 88> estavel"` saía como `"PA (contexto_do_paciente) estavel"`: os sinais vitais sumiam. A
+  cauda casa qualquer coisa que não seja `>`, então descartá-la é apagar texto clínico — e o
+  contexto do banco passa por aqui antes de chegar ao modelo. Contradizia o "nenhuma ponta de
+  texto se cola a outra" que o módulo promete, pela mesma razão que a troca é por parêntese e não
+  por remoção. A cauda passou a ser emitida de volta.
+- **O `NFKC` fechava as variantes de tag reescrevendo a carga clínica.** Ele não distingue
+  look-alike de tag de notação com significado: `10⁻⁶` virava `10−6` (expoente vira subtração),
+  `cm³` virava `cm3`, `½` virava `1⁄2` com U+2044, que não é `/`. O primeiro é o que decide — o
+  modelo lê uma subtração onde havia ordem de grandeza. Só os confusáveis de `<` e `>` precisam
+  ser achatados para o casamento funcionar, e agora é um `str.maketrans` de 20 sinais de ângulo
+  (largura completa, forma pequena, aspa angular, CJK, matemático, ornamentos). O descarte de
+  categoria `Cf` continua, que é o que fecha o zero-width space.
+- **O `IGNORECASE` do `_IDENTIFICADOR_DE_FONTE` passou a ler token clínico como CID.** Medido,
+  `vitamina b12`, `leito a12`, `escala k10` e `sala c04` viravam identificador; como o
+  `fonte_confere` exige que **todos** apareçam no contexto, `[Fonte: exames de vitamina b12]`
+  contra um contexto que escreve "vitamina B 12" caía no `warnings.warn` e gravava `source: null,
+  tem_fonte: false` para uma citação válida. Aqui casar demais não é o lado seguro: o custo é
+  perder explicabilidade, não ganhar.
+
+  **As duas correções sugeridas eram excludentes tomadas sozinhas.** `(?-i:[A-Z])` reabre a
+  fresta do `cid j99` que a rodada anterior fechou; exigir a pista `cid` perde o `[Fonte:
+  protocolo G43]` que o modelo real emitiu no próprio teste da revisão. São dois ramos: código em
+  caixa alta vale sozinho, e em minúscula vale ancorado na pista `cid`. Os cinco comportamentos
+  estão testados de uma vez.
+- **O `AVISO_PRESCRICAO` comia o recorte da trilha.** 161 dos 200 caracteres, sobrando 39
+  cortados no meio da palavra — o mesmo efeito que tirou o carimbo de alergia do recorte, e o
+  mesmo argumento: a entrada já registra `guardrail_triggered` e `motivos`. A trilha passou a
+  gravar a `limpa` (pós-corte, pós-dedup, pré-guardrail), o que resolve o rodapé de validação
+  junto e não precisa tratar caso a caso.
+- **O `chmod` do diretório alcançava a `$HOME` e a raiz do repositório.** A exclusão do P4 cobria
+  o gravável por todos e o de outro dono — e "nosso e não gravável por todos" descreve tanto o
+  `logs/` quanto os dois diretórios em que a nossa vida inteira mora. Medido,
+  `AUDIT_LOG_PATH=~/audit.jsonl` apertava a home e `AUDIT_LOG_PATH=audit.jsonl` apertava a raiz
+  do repo, sem aviso, só por instanciar o assistente.
+
+  **Desvio das duas correções sugeridas, e o motivo.** "Restringir ao que está em `criados`"
+  perde o ganho que motivou o passo, que é justamente o `logs/` versionado; "exigir que a folha
+  esteja vazia" não serve porque o `logs/` tem `.gitkeep`. E um denylist de `{home, raiz}` teria
+  movido o defeito para `~/Documents` em vez de fechá-lo. O critério passou a ser um allowlist do
+  que o projeto possui: dentro da `RAIZ` e não a própria `RAIZ`. A checagem de propriedade
+  continua por cima, porque dentro da `RAIZ` um diretório gravável por todos é anomalia.
+
+Corrigido, e é vazamento de PII — não o que a revisão descreveu:
+
+- **A restauração de data recolocava no arquivo um identificador que a anonimização já tinha
+  redigido.** A revisão enquadrou como perda de integridade ("a trilha afirma uma data que não
+  estava naquela posição"), e é pior que isso:
+
+  ```
+  in : consulta de 05 de maio de 2020, prontuario 12/03/2026
+  out: consulta de 12/03/2026, prontuario [PACIENTE_ID]
+  ```
+
+  O `12/03/2026` é o número de prontuário. A regra de prontuário roda **antes** das de data,
+  consome o valor e emite `[PACIENTE_ID]`; a data extensa vira `[DATA]`. Aí
+  `count(TOKEN_DATA) == len(datas) == 1`, a guarda por contagem deixava passar, e o `replace`
+  punha o identificador redigido em claro na posição da outra data.
+
+  Isso muda a correção: restaurar por span, como a revisão propôs, colocaria o número de
+  prontuário em claro no lugar *certo* — pior, não melhor. O conflito não é de posição, é de
+  colisão de regras. Cada data numérica passou a ser marcada com uma sentinela **antes** da
+  anonimização; sentinela que sobrevive era data livre e é restaurada na posição de origem,
+  sentinela que desaparece foi comida pela regra da âncora e denuncia a colisão, e aí nada é
+  restaurado. O "posicional e falha fechado" do docstring passou a valer literalmente.
+
+  Ganho de tabela: com a guarda por contagem, `"consulta de 12 de março de 2026 e exame de
+  03/04/2026"` falhava fechado e perdia a rastreabilidade das duas datas. Agora a extensa
+  continua redigida e a numérica volta ao seu lugar.
+
+Não corrigido, e por quê:
+
+- [ ] **O alerta de alergia dispara pela menção do próprio modelo, não pelo caminho que a
+      correção protege.** Verificado com o modelo real na revisão: em pergunta aberta o modelo
+      recita protocolo e menciona a alergia na última frase, e é essa menção que dispara o
+      carimbo. A sugestão era limitar a conferência ao nível de frase ou pular respostas que já
+      tratam a alergia como contraindicação. Não foi feito, e o motivo já está escrito no
+      `chain.py`: suprimir o carimbo determinístico porque o modelo coincidiu devolve a garantia
+      ao modelo. O carimbo existe para o médico distinguir o que veio do prontuário do que veio
+      da geração — se ele desaparece quando a geração coincide, a distinção deixa de valer no
+      caso em que ela mais importa. O que fica registrado é o fato: enquanto o P2 não fechar, o
+      lado da resposta dispara predominantemente por menção.
