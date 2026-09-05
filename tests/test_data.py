@@ -131,7 +131,7 @@ def test_save_jsonl_uma_linha_fisica_por_registro(tmp_path):
 def test_load_pubmedqa_descarta_registros_incompletos(mocker):
     # Sem tocar a rede: o dataset é mockado.
     mocker.patch(
-        "src.data.loader.load_dataset",
+        "src.data.loader._baixar_dataset",
         return_value={"train": [REGISTRO_CRU, {"pubid": 2, "question": "", "long_answer": "x"}]},
     )
 

@@ -144,7 +144,16 @@ python -m src.fine_tuning.evaluator
 python -m src.database.seed
 
 # 7. Iniciar assistente médico interativo
+#    Pergunta o paciente e depois a pergunta. '?' lista os pacientes do banco;
+#    o identificador aceita '7', '007' ou '[PACIENTE_007]'
 python -m src.assistant.chain
+
+#    Uma pergunta só, sem entrar no interativo — é a forma de repetir a mesma
+#    pergunta contra vários pacientes e comparar o resultado
+python -m src.assistant.chain --paciente 7 --pergunta "Quais exames estão pendentes?"
+
+#    Lista os pacientes disponíveis sem carregar o modelo
+python -m src.assistant.chain --listar
 
 # 8. Executar fluxo LangGraph
 python -m src.graph.clinical_flow
