@@ -166,6 +166,34 @@ def _e_diretorio_do_projeto(diretorio: Path) -> bool:
     return not (compartilhado or de_outro_dono)
 
 
+def _apertar_trilha(caminho: Path) -> None:
+    """Tira a permissão de leitura alheia da trilha, inclusive de um arquivo preexistente.
+
+    O `touch(mode=MODO_ARQUIVO)` só fixa o modo no instante da criação, e o caso comum do
+    projeto é justamente o arquivo que já existe: quem rodou qualquer versão anterior a este
+    controle tem um `logs/audit.jsonl` criado com o umask (0644), legível por qualquer conta
+    da máquina, e nenhuma escrita posterior o promove. Medido neste repositório: o diretório
+    estava em 0700 e o arquivo dentro dele, com 30 KB de trilha, em 0644 — o controle existia
+    e nunca tinha valido para o arquivo que de fato existe.
+
+    O aperto é **só quando há bit de grupo ou de outros** e é para `MODO_ARQUIVO`, não uma
+    reaplicação cega: um arquivo já em 0600, ou em 0400 porque alguém o congelou de propósito,
+    não é tocado. É a mesma ideia do `_apertar_diretorios` — corrigir o que ficou frouxo sem
+    desfazer decisão de quem mexeu — e a mesma tolerância a falha, pela mesma razão: a trilha
+    escrita vale mais que a trilha endurecida, e derrubar a consulta clínica porque o `chmod`
+    não passou troca uma perda certa por uma incerta.
+    """
+    try:
+        if caminho.stat().st_mode & 0o077:
+            caminho.chmod(MODO_ARQUIVO)
+    except OSError as erro:
+        warnings.warn(
+            f"Não foi possível restringir {caminho} a {MODO_ARQUIVO:o}: {erro}. "
+            "A trilha continua sendo escrita, e pode estar legível por outras contas.",
+            stacklevel=3,
+        )
+
+
 def _apertar_diretorios(folha: Path, criados: list[Path]) -> None:
     """Aplica `MODO_DIRETORIO` no diretório da trilha e nos que acabaram de ser criados.
 
@@ -228,8 +256,16 @@ _DATA_RASTREAVEL = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{4}-\d{2}-
 _SENTINELA_DE_DATA = "400289220{:03d}"
 
 
-def _anonimizar_fonte(texto: str) -> str:
+def anonimizar_fonte(texto: str) -> str:
     """Anonimiza a citação de fonte, mas devolve as datas ao lugar.
+
+    É pública, e não `_privada` como as outras deste bloco, porque o `chain.py` precisa dela
+    **fora** do `log()`: quando a fonte citada não confere com o contexto, ela não é gravada
+    (vira `None` na trilha) mas é mostrada num `warnings.warn` — e a fonte é texto livre
+    gerado pelo modelo. Sem passar por aqui, o único registro que sobrava daquele texto era o
+    do `stderr`, em claro, que é a tela do notebook de demonstração e do vídeo de entrega. A
+    garantia deste módulo é sobre o que persiste em disco; o aviso caía fora dela por não ser
+    escrita, e o efeito prático era o mesmo.
 
     O `source` é texto livre gerado pelo modelo e precisa da mesma anonimização dos outros
     campos — o modelo cita `[Fonte: consulta do paciente Joao Souza de 12/03/2026]`, que é
@@ -370,7 +406,7 @@ class AuditLogger:
             "response_preview": _anonimizar_conversa(
                 _limitar_texto_livre(response or "")
             )[:PREVIEW_CARACTERES],
-            "source": _anonimizar_fonte(_limitar_texto_livre(source or "")) or None,
+            "source": anonimizar_fonte(_limitar_texto_livre(source or "")) or None,
             "guardrail_triggered": guardrail_triggered,
             "tem_fonte": tem_fonte,
             "motivos": list(motivos),
@@ -379,9 +415,9 @@ class AuditLogger:
         # `ensure_ascii=False` mantém o português legível no arquivo: com o padrão, "asmática"
         # vira "asmática" e a trilha fica ilegível justamente na hora de exibi-la.
         linha = json.dumps(entrada, ensure_ascii=False)
-        # `touch` antes do append: o modo só vale no instante da criação, e é o único momento
-        # em que dá para fixá-lo sem mexer na permissão de um arquivo que alguém já ajustou.
+        # `touch` antes do append: o modo só vale no instante da criação.
         self.log_path.touch(mode=MODO_ARQUIVO, exist_ok=True)
+        _apertar_trilha(self.log_path)
         with self.log_path.open("a", encoding="utf-8") as arquivo:
             arquivo.write(f"{linha}\n")
         return entrada

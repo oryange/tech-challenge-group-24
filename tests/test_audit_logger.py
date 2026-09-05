@@ -235,6 +235,34 @@ def test_nao_aperta_diretorio_nosso_de_proposito_geral(tmp_path, monkeypatch, no
     assert folha.stat().st_mode & 0o777 == 0o755
 
 
+def test_aperta_a_trilha_que_ja_existia_com_o_umask(tmp_path):
+    # O caso real do projeto: quem rodou qualquer versão anterior a este controle tem um
+    # `logs/audit.jsonl` criado com o umask (0644) e legível por qualquer conta da máquina. O
+    # `mode=` do `touch` só vale na criação, então nenhuma escrita posterior o promovia — o
+    # diretório saía 0700 e o arquivo dentro dele continuava 0644, com a trilha inteira.
+    destino = tmp_path / "audit.jsonl"
+    destino.touch(mode=0o644)
+    logger = AuditLogger(destino)
+
+    _log(logger)
+
+    assert destino.stat().st_mode & 0o777 == MODO_ARQUIVO
+
+
+def test_nao_afrouxa_trilha_que_alguem_apertou_mais(tmp_path):
+    # O aperto age só sobre bit de grupo ou de outros. Um arquivo congelado em 0400 de
+    # propósito não é reaberto para escrita pelo `chmod` — corrigir o que ficou frouxo não é
+    # licença para desfazer decisão de quem mexeu.
+    # O helper é chamado direto porque uma trilha 0400 não é gravável nem pelo dono: passar
+    # por `log()` mediria o `open("a")` falhando, não o critério do aperto.
+    destino = tmp_path / "audit.jsonl"
+    destino.touch(mode=0o400)
+
+    audit_logger_module._apertar_trilha(destino)
+
+    assert destino.stat().st_mode & 0o777 == 0o400
+
+
 def test_aperta_tambem_os_diretorios_intermediarios(tmp_path):
     # `parents=True` cria os intermediários sem o `mode`: só o último saía 0700.
     destino = tmp_path / "a" / "b" / "c" / "audit.jsonl"
@@ -355,15 +383,20 @@ def test_source_ausente_continua_distinto_de_source_vazio(logger):
     assert _log(logger, source="")["source"] is None
 
 
-def test_nao_reescreve_a_permissao_de_uma_trilha_existente(logger):
+def test_reaperta_a_trilha_que_foi_afrouxada(logger):
     _log(logger)
     logger.log_path.chmod(0o640)
 
     _log(logger)
 
-    # `touch` só aplica o modo na criação: quem afrouxou de propósito não é sobrescrito a
-    # cada consulta clínica.
-    assert logger.log_path.stat().st_mode & 0o777 == 0o640
+    # Decisão revista. Antes a trilha afrouxada era deixada como estava, sob o argumento de
+    # não sobrescrever quem tinha mexido de propósito. O que a revisão mediu é que o caso real
+    # não é esse: o `logs/audit.jsonl` do repositório foi criado com o umask antes de o
+    # controle existir e ficou em 0644, e o `mode=` do `touch` nunca o promoveria. Não há uso
+    # legítimo para bit de grupo ou de outros num arquivo que guarda pergunta de médico em
+    # texto livre — o grupo de uma máquina corporativa é todo mundo. Apertar mais que
+    # `MODO_ARQUIVO` continua sendo respeitado, que é o lado em que a intenção é plausível.
+    assert logger.log_path.stat().st_mode & 0o777 == MODO_ARQUIVO
 
 
 def test_patient_id_nao_e_anonimizado(logger):
