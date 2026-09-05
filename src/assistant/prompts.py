@@ -191,7 +191,7 @@ _SINAIS_DE_ANGULO = (
 # exatamente o dano que trocar o `NFKC` pelo achatamento dirigido veio evitar.
 _FULLWIDTH_ASCII = {chr(codigo): chr(codigo - 0xFEE0) for codigo in range(0xFF01, 0xFF5F)}
 
-_CONFUSAVEIS_DE_ANGULO = str.maketrans({**_FULLWIDTH_ASCII, **_SINAIS_DE_ANGULO})
+_ACHATAMENTO = str.maketrans({**_FULLWIDTH_ASCII, **_SINAIS_DE_ANGULO})
 
 
 def _achatar_unicode(texto: str) -> str:
@@ -201,25 +201,33 @@ def _achatar_unicode(texto: str) -> str:
     assim mesmo, porque quem lê é um modelo de linguagem e não um parser de XML:
 
     - **Look-alike Unicode.** `＜/pergunta_do_medico＞` usa FULLWIDTH LESS-THAN SIGN (U+FF1C) no
-      lugar de `<`. O `_CONFUSAVEIS_DE_ANGULO` mapeia esse punhado de sinais para o ASCII.
+      lugar de `<`. O `_ACHATAMENTO` cobre o bloco Fullwidth ASCII inteiro (U+FF01–U+FF5E, 94
+      caracteres) mais os sinais de ângulo avulsos de `_SINAIS_DE_ANGULO`.
     - **Caracteres de formatação.** `</pergunta_do_medico​>` traz um zero-width space
       entre o nome e o `>`. Eles não têm largura na tela nem valor semântico no dado clínico,
       e a categoria `Cf` os isola sem tocar em acento nem em pontuação.
 
-    O achatamento é **dirigido aos confusáveis de ângulo**, e não um `NFKC` no texto inteiro.
-    O `NFKC` fechava as mesmas variantes, mas reescrevia a carga clínica junto, porque não
-    distingue look-alike de tag de notação com significado:
+    O achatamento é um **`NFKC` parcial, restrito ao bloco Fullwidth ASCII** (mais os ângulos
+    avulsos), e não um `NFKC` no texto inteiro. O `NFKC` fechava as mesmas variantes, mas
+    reescrevia a carga clínica junto, porque não distingue look-alike de notação com
+    significado:
 
         'Sensibilidade 10⁻⁶ mol' -> 'Sensibilidade 10−6 mol'   (expoente vira subtração)
         'Volume 5 cm³'           -> 'Volume 5 cm3'
         'Dose ½ comprimido'      -> 'Dose 1⁄2 comprimido'      (U+2044, que não é `/`)
 
     O primeiro é o que decide: `10⁻⁶` virar `10−6` faz o modelo ler uma subtração onde havia
-    uma ordem de grandeza, e é o contexto do paciente que passa por aqui. Só os confusáveis de
-    `<` e `>` precisam ser achatados para o casamento funcionar — o resto do texto não é do
-    escopo desta função, e mexer nele é dano sem contrapartida.
+    uma ordem de grandeza, e é o contexto do paciente que passa por aqui. Expoente, subscrito,
+    fração, potência e numeral romano vivem todos fora do bloco Fullwidth e seguem intocados —
+    ver o comentário de `_FULLWIDTH_ASCII`.
+
+    Achatar o bloco inteiro, e não só os ângulos, é o que fecha o payload em largura completa.
+    Converter apenas `＜` e `＞` deixava o nome do bloco passar e ainda **afiava** a entrada:
+    devolvia `<` e `>` ASCII reais em volta de um nome que o padrão não casa, entregando ao
+    modelo algo mais parecido com uma tag do que o que o atacante escreveu. Pior que não fazer
+    nada — é esse o argumento que sustenta o alcance atual.
     """
-    achatado = texto.translate(_CONFUSAVEIS_DE_ANGULO)
+    achatado = texto.translate(_ACHATAMENTO)
     return "".join(c for c in achatado if unicodedata.category(c) != "Cf")
 
 
