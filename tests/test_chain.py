@@ -6,8 +6,8 @@ em vez de usar um mock solto é o que garante que a chain LCEL exercitada aqui �
 roda em produção — um `Mock()` aceitaria qualquer coisa no operador `|` e o teste passaria
 mesmo se a chain estivesse montada errada.
 
-O banco é um SQLite temporário, populado com o mesmo seed do PR 03, com poucos pacientes para
-o teste ficar rápido.
+O banco é um SQLite temporário, populado com o mesmo seed de `src/database/seed.py`, com poucos
+pacientes para o teste ficar rápido.
 """
 
 from __future__ import annotations
@@ -646,7 +646,7 @@ def test_ask_nao_mostra_pii_crua_no_aviso_de_fonte_sem_correspondencia(assistent
     # A fonte que não confere não é gravada (vira `None` na trilha), então o `stderr` passa a
     # ser o único registro daquele texto — e ele vai para a tela do notebook de demonstração e
     # do vídeo de entrega. O modelo cita na forma ancorada, que é justamente a que o
-    # anonimizador do PR 02 pega: sem anonimizar antes de avisar, o nome saía em claro.
+    # anonimizador do pipeline de dados pega: sem anonimizar antes de avisar, o nome saía em claro.
     assistente.llm.resposta = "Houve melhora. [Fonte: consulta do paciente Joao Souza de 09/09/1999]"
 
     resultado = assistente.ask("Como foi a consulta?", patient_id=PACIENTE)

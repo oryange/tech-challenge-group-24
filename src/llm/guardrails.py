@@ -17,7 +17,7 @@ Ela está aqui como defesa em profundidade, não como controle principal. O que 
 segura o sistema é estrutural e mora fora deste módulo:
 
 1. a pergunta do médico entra no prompt dentro de um bloco delimitado e declarado como
-   dado, não como instrução (`src/assistant/prompts.py`, PR 07);
+   dado, não como instrução (`src/assistant/prompts.py`);
 2. o assistente não tem autoridade para prescrever em lugar nenhum do fluxo — mesmo uma
    injeção bem-sucedida devolve texto que sai daqui com o rodapé de validação humana.
 
@@ -86,7 +86,7 @@ _PADROES_PRESCRICAO: tuple[tuple[str, re.Pattern[str]], ...] = (
 
 @dataclass(frozen=True)
 class ResultadoGuardrails:
-    """Saída de `apply_guardrails`, já pronta para o retorno e o log do PR 07.
+    """Saída de `apply_guardrails`, já pronta para o retorno e o log do `chain.py`.
 
     `guardrail_triggered` e `tem_fonte` são separados de propósito. O primeiro responde
     "o limite de atuação precisou agir?" e é o que o audit log registra como evento; o

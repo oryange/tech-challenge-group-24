@@ -92,7 +92,7 @@ def test_log_anonimiza_pii_da_pergunta(logger):
 
 
 def test_log_anonimiza_telefone_sem_formatacao(logger):
-    # As regras do PR 02 exigem parênteses ou o +55; quem digita no chat escreve o número
+    # As regras do `anonymizer` exigem parênteses ou o +55; quem digita no chat escreve o número
     # corrido, e é esse que ia para o disco.
     entrada = _log(logger, query="Ligar para 11987654321.")
 
@@ -101,7 +101,7 @@ def test_log_anonimiza_telefone_sem_formatacao(logger):
 
 
 def test_log_anonimiza_cpf_sem_pontuacao(logger):
-    # Sem a âncora "CPF" na frente, a regra do PR 02 não casa o número solto.
+    # Sem a âncora "CPF" na frente, a regra do `anonymizer` não casa o número solto.
     entrada = _log(logger, query="Confirmar cadastro 12345678901 antes da consulta.")
 
     assert "12345678901" not in entrada["query"]
@@ -110,7 +110,7 @@ def test_log_anonimiza_cpf_sem_pontuacao(logger):
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Limite declarado no módulo: as regras do PR 02 são ancoradas em contexto para não "
+        "Limite declarado no módulo: as regras do `anonymizer` são ancoradas em contexto para não "
         "destruir o dataset de treino, e detectar nome próprio solto por regex tem falso "
         "positivo caro em texto clínico. Registrado como falha esperada para não virar "
         "garantia implícita."
@@ -136,7 +136,7 @@ def test_log_anonimiza_antes_de_recortar(logger):
 
 
 def test_log_limita_o_texto_livre_antes_de_anonimizar(logger):
-    # `log()` é API pública e nem todo chamador passa pelo `sanitize_input` do PR 05. Sem o
+    # `log()` é API pública e nem todo chamador passa pelo `sanitize_input` dos guardrails. Sem o
     # teto, uma entrada de megabytes atravessa inteira as regex do anonimizador.
     entrada = _log(logger, query="a" * (LIMITE_TEXTO_LIVRE * 3))
 
@@ -182,7 +182,7 @@ def test_log_com_texto_livre_ausente_nao_quebra(logger):
 
 
 def test_o_teto_nao_atrapalha_a_anonimizacao(logger):
-    # O corte é ordens de grandeza maior que o alcance das âncoras do PR 02: uma pergunta no
+    # O corte é ordens de grandeza maior que o alcance das âncoras do `anonymizer`: uma pergunta no
     # limite continua tendo o nome redigido normalmente.
     enchimento = "Evolução sem intercorrências. " * 40
     entrada = _log(logger, query=f"{enchimento}O paciente João Silva relata febre.")
@@ -400,7 +400,7 @@ def test_reaperta_a_trilha_que_foi_afrouxada(logger):
 
 
 def test_patient_id_nao_e_anonimizado(logger):
-    # Já é token do seed do PR 03; anonimizá-lo destruiria a chave de filtro.
+    # Já é token do seed do banco; anonimizá-lo destruiria a chave de filtro.
     entrada = _log(logger, patient_id="[PACIENTE_007]")
 
     assert entrada["patient_id"] == "[PACIENTE_007]"
@@ -464,7 +464,7 @@ def test_linha_corrompida_nao_e_descartada_em_silencio(logger):
 
 
 def test_log_registra_a_explainability_do_pr05(logger):
-    # `tem_fonte` é a métrica de explainability do enunciado: calculada no PR 05, ela só
+    # `tem_fonte` é a métrica de explainability do enunciado: calculada nos guardrails, ela só
     # existe depois da entrega se alguém a persistir.
     entrada = _log(logger, tem_fonte=False, motivos=("sem_fonte", "prescricao_na_pergunta"))
 

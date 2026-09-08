@@ -242,7 +242,7 @@ def neutralizar_delimitadores(texto: str) -> str:
 
     A troca é de `<` e `>` por parênteses em vez de remoção. O texto continua legível para o
     modelo (que vê `(/pergunta_do_medico)` e entende que alguém escreveu aquilo), e nenhuma
-    ponta de texto se cola a outra — mesma razão pela qual o `sanitize_input` do PR 05
+    ponta de texto se cola a outra — mesma razão pela qual o `sanitize_input` do `guardrails.py`
     substitui por marcador em vez de apagar.
 
     O texto passa antes por `_achatar_unicode`, que fecha as variantes que o padrão sozinho

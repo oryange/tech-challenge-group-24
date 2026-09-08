@@ -99,7 +99,7 @@ def _do_ambiente(variavel: str, padrao: Path) -> Path:
 class LoRAConfig:
     """Configuração de uma rodada de fine-tuning.
 
-    Os valores padrão são os do plano do projeto. `frozen=True` porque a configuração é
+    Os valores padrão são os adotados no projeto. `frozen=True` porque a configuração é
     gravada junto dos adapters como registro da rodada: se ela pudesse ser mutada depois de
     passar pelo trainer, o registro deixaria de descrever o treino que de fato aconteceu.
     """
@@ -141,8 +141,8 @@ class LoRAConfig:
     # Com 1024, nenhuma sequência é truncada (o máximo observado é 875 tokens).
     max_seq_length: int = 1024
 
-    # Não estão no plano: existem para a célula de curvas de loss do notebook. Com o padrão
-    # do MLX (`steps_per_eval=200`) uma rodada de 500 iterações renderia 2 pontos de
+    # Não são hiperparâmetros de treino: existem para a célula de curvas de loss do notebook. Com
+    # o padrão do MLX (`steps_per_eval=200`) uma rodada de 500 iterações renderia 2 pontos de
     # validação, o que não desenha curva nenhuma. Com 50, são 10 pontos.
     steps_per_report: int = 10
     steps_per_eval: int = 50
