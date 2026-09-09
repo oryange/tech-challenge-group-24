@@ -809,26 +809,48 @@ PR 09 cria:
 
 ---
 
-### PR 10 — Integração final e testes de ponta a ponta
-**Responsável:** Pessoa A ou B juntas  
-**Entrega:** projeto completo, todos os testes passando
+### PR 10 — Validação a partir de um clone limpo
+**Responsável:Pessoa A ou B
+**Entrega:** confirmação de que o projeto funciona para quem chega de fora
 
-- [ ] Rodar `pytest tests/` — todos os testes passam (exceto `@integration`)
-- [ ] Executar o pipeline completo de ponta a ponta:
-  1. `python -m src.data.loader`
-  2. `python -m src.data.synthetic_generator`
-  3. `python -m src.data.curator`
-  4. `python -m src.database.seed`
-  5. `python -m src.assistant.chain` (interativo)
-- [ ] Executar fluxo LangGraph: `python -m src.graph.clinical_flow`
-- [ ] Verificar `logs/audit.jsonl` com registros reais
-- [ ] Executar fine-tuning: `python -m src.fine_tuning.trainer` (pode ser rodado uma vez
-      localmente e commitado o notebook executado)
-- [ ] Executar a avaliação: `python -m src.fine_tuning.evaluator`
-  - confirmar que `docs/evaluation_results.json` foi gerado com as métricas baseline vs
-    fine-tuned — é a fonte dos números do relatório técnico e da demonstração do vídeo
-- [ ] Revisar todos os notebooks — garantir que estão executados com output visível
-- [ ] Revisão final do `docs/relatorio-tecnico.md`
+> **Pré-requisito:** PR 09 mergeado.
+
+Este PR não reexecuta o que o PR 09 já executou. Para o notebook sair com output, o PR 09
+roda o modelo, o banco, o assistente e o grafo — repetir isso na mesma máquina não descobre
+nada. O que sobra é o que o PR 09 não consegue fazer por definição, e são duas coisas: rodar
+**a partir de um clone limpo**, onde `data/`, `venv/` e `.env` não estão montados há semanas, e
+ser revisado por **outra pessoa**. É a mesma razão pela qual o P4 e o P5 existem separados do
+PR 07.
+
+O enunciado não pede este PR. Ele existe porque "instruções completas no README" é requisito
+obrigatório, e a única forma de conferir se as instruções estão completas é seguir apenas elas.
+Se ninguém além de quem escreveu o PR 09 for rodar esta validação, o honesto é fundir os itens
+no PR 09 e apagar esta seção — validação que a própria autora faz na própria máquina não é
+validação, é repetição.
+
+**Clone limpo, seguindo só o README — sem consultar o resto do repositório:**
+
+- [ ] Clonar em diretório novo, criar o venv com `python3.13` e instalar as dependências pelos
+      passos do README, anotando **todo** ponto em que foi preciso adivinhar algo
+- [ ] `python -m scripts.check_env` — exit 0
+- [ ] `pytest tests/ -m "not integration"` — sem falhas
+- [ ] Executar a sequência de comandos do README na ordem em que ela está escrita, até o
+      assistente responder. O fine-tuning pode ser pulado: os adapters já estão versionados e
+      o `02_fine_tuning.ipynb` registra a execução
+- [ ] `python -m src.graph.clinical_flow` nos dois ramos da condicional
+- [ ] Conferir a trilha da sessão por `get_session_logs` — não abrindo `logs/audit.jsonl`,
+      pelo mesmo motivo das regras do PR 09
+- [ ] Alinhar a lista de comandos deste checklist com a do README, que hoje divergem em número
+      e em ordem. Ficou registrado como pendência daqui pelo PR 09
+
+**Revisão por quem não escreveu:**
+
+- [ ] `docs/relatorio-tecnico.md` — os números conferem contra `docs/evaluation_results.json`,
+      e a análise responde "onde melhorou e onde não", não só tabela
+- [ ] Os notebooks estão executados com output visível, e **nenhum** output committado contém
+      `response_preview`, `query`, nome de pessoa ou token. É a verificação humana do gate de
+      pre-commit que o PR 09 instalou — o hook pega o que ele sabe procurar
+- [ ] Os diagramas de `docs/diagramas.md` renderizam no GitHub e descrevem o código atual
 
 ---
 
@@ -836,7 +858,9 @@ PR 09 cria:
 **Responsável:** Pessoa A e B juntas
 **Entrega:** vídeo de até 15 minutos (entregável obrigatório da Fase 3)
 
-> **Pré-requisito:** PR 10 concluído — o vídeo grava o sistema já funcionando de ponta a ponta
+> **Pré-requisito:** PR 09 mergeado — é ele que deixa o sistema gravável, com o notebook
+> executado e o relatório escrito. O PR 10 corre em paralelo: ele valida o clone limpo, não
+> prepara a gravação, e o vídeo é gravado na máquina que tem o modelo.
 
 Os quatro itens abaixo são exigidos explicitamente pelo enunciado e devem aparecer no vídeo:
 
@@ -867,9 +891,15 @@ PR 01 (setup)
   ├── PR 02 (dados)        → PR 04 (fine-tuning)  →  PR 09 (docs/demo)
   ├── PR 03 (banco)        ↗
   ├── PR 05 (LLM/guardrails)  →  PR 07 (LangChain)  →  PR 09
-  ├── PR 06 (audit logger)    →  PR 08 (LangGraph)   →  PR 09
-  └──────────────────────────────────────────────── PR 10 (integração final) → PR 11 (vídeo)
+  └── PR 06 (audit logger)    →  PR 08 (LangGraph)   →  PR 09
+
+PR 09  ├──→ PR 11 (vídeo, na máquina que tem o modelo)
+       └──→ PR 10 (validação em clone limpo, por outra pessoa)
 ```
+
+Os dois últimos correm em paralelo: o vídeo grava o sistema que o PR 09 deixou pronto, e a
+validação do PR 10 é a leitura de fora — se ela achar algo, o conserto entra antes da entrega
+final, não antes da gravação.
 
 **Paralelismo possível após PR 01:**
 - Pessoa A: PR 02 → PR 04 → PR 08
