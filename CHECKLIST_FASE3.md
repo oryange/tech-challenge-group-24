@@ -590,13 +590,13 @@ tech-challenge-group-24/
 
 ---
 
-### PR 08 — Fluxo LangGraph
+### PR 08 — Fluxo LangGraph ✅
 **Responsável:** Pessoa A  
 **Entrega:** fluxo de decisão clínica automatizado
 
 > **Pré-requisito:** PRs 03, 05, 06 mergeados
 
-- [ ] `src/graph/clinical_flow.py`
+- [x] `src/graph/clinical_flow.py`
   - TypedDict `ClinicalState`:
     - `patient_id: str`
     - `exams: list[dict]`
@@ -621,7 +621,7 @@ tech-challenge-group-24/
   - `run_clinical_flow(patient_id, session_id)`: executa o grafo e retorna estado final
   - Executável: `python -m src.graph.clinical_flow`
 
-- [ ] `tests/test_graph.py`
+- [x] `tests/test_graph.py`
   - `test_intake_node_loads_patient()` — paciente carregado corretamente
   - `test_check_exams_finds_pending()` — detecta exames pendentes
   - `test_alert_generated_when_exams_pending()` — alerta emitido
@@ -631,6 +631,41 @@ tech-challenge-group-24/
   - Todos com mock do banco e do LLM
 
 **Dependências de outras PRs:** PR 03, PR 05, PR 06
+
+**O que saiu diferente do plano, e por quê**
+
+- **Os nós recebem `(state, deps)` e o grafo os liga com `functools.partial`.** O LangGraph
+  chama cada nó só com o estado, então as dependências teriam de vir de um `from_env()` dentro
+  de cada nó — três leituras do `.env` por execução e, pior, três instâncias do modelo — ou
+  de dentro do próprio estado, onde trafegariam entre nós e seriam serializadas junto com ele.
+  A `Dependencias` fechada no `build_graph` mantém os nós testáveis um a um, que é o que os
+  seis testes do plano exigem.
+- **O `suggest_treatment_node` chama o `MedicalAssistant`, não o LLM.** O plano diz "chama LLM
+  para sugerir conduta", e o caminho literal seria `llm.invoke`. Pelo assistente, a sugestão sai
+  com o contexto montado como o PR 07 monta, com o alerta de alergia imposto por código, com o
+  rodapé de validação garantido e com a trilha escrita. Pelo LLM cru, o ramo automatizado — o
+  que roda sem ninguém olhando — seria o caminho com menos garantias do sistema inteiro.
+- **`session_id` passou a ter allowlist (`_validar_session_id`).** Na CLI do PR 07 ele é
+  constante; aqui vem de `--sessao` e vai direto para a trilha, e o `log()` do PR 06 anonimiza
+  `query`, `response` e `source` — não o `session_id`. Sem forma nem teto, o campo vira depósito
+  de texto livre no arquivo que o notebook abre e o vídeo grava. Até 64 caracteres entre letras,
+  dígitos e `.`, `_`, `:`, `-`, com padrão linear pelo mesmo motivo das regex do PR 05.
+- **A sessão default é `uuid4`, não um contador nem um timestamp.** Identificador previsível
+  deixa quem lê a trilha enumerar as execuções vizinhas, e o valor não custa nada a mais para
+  ser imprevisível.
+- **Havendo exame pendente, o fluxo alerta e não sugere conduta.** É o que a borda condicional
+  do plano descreve, e a razão clínica está registrada no módulo: conduta sobre quadro cujo
+  exame não voltou parece completa e não é. Nesse ramo o modelo nem chega a ser chamado.
+- **O `human_validation_node` também passa a sugestão pelo `validate_response`.** O plano pede
+  só a marcação do campo. A passada é idempotente e na prática nunca muda o texto (o `ask` já
+  aplicou), e está ali pelo caso em que muda: o P4 registra que a marca de validação é forjável
+  pelo próprio modelo, e o nó que se chama "validação humana" é onde essa checagem tem de estar
+  quando alguém for consertar.
+- **Verificado de ponta a ponta com o modelo real**, os dois ramos: `--paciente 13` (3 pendentes)
+  caiu em `alert_team` sem chamar o modelo, `--paciente 2` (0 pendentes) caiu em
+  `suggest_treatment` e devolveu conduta com `[Fonte: protocolo A09]` e o rodapé de validação. As
+  duas execuções na mesma sessão saem juntas por `get_session_logs`, e a data do prontuário sai
+  redigida como `[DATA]` no `response_preview`.
 
 ---
 

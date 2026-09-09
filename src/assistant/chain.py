@@ -15,9 +15,10 @@ Uso interativo, a partir da raiz do repositório:
 
     python -m src.assistant.chain
 
-É a peça que junta as quatro anteriores: o modelo fine-tuned do PR 04 pelo wrapper do PR 05,
-os limites de atuação do PR 05, o banco de pacientes do PR 03 e a trilha de auditoria do
-PR 06. Nada de lógica clínica mora aqui — este módulo é a ordem em que as peças se aplicam.
+É a peça que junta as quatro anteriores: o modelo fine-tuned (`src/fine_tuning/`) pelo wrapper
+de `src/llm/model.py`, os limites de atuação de `src/llm/guardrails.py`, o banco de pacientes
+de `src/database/` e a trilha de auditoria de `src/audit/`. Nada de lógica clínica mora aqui —
+este módulo é a ordem em que as peças se aplicam.
 
 A chain é LCEL (`prompt | llm | parser`). O `LLMChain` e o `ConversationBufferMemory` não
 existem mais no pacote principal do LangChain 1.x — foram para o `langchain-classic`, e
@@ -29,8 +30,9 @@ no prompt como **texto**, não como turnos de mensagem. O porquê, com os númer
 
 Duas coisas neste módulo são remendo, não solução, e estão marcadas como tal no código: o
 `cortar_repeticao`, que existe porque o modelo degenera em loop, e a checagem de prescrição
-antes da inferência. As correções de raiz são de outros PRs — `repetition_penalty` no PR 05
-e o dataset no PR 04 — e estão registradas em "Pendências abertas" no `CHECKLIST_FASE3.md`.
+antes da inferência. As correções de raiz são de outros módulos — `repetition_penalty` em
+`src/llm/model.py` e o dataset do fine-tuning — e estão registradas em "Pendências abertas" no
+`CHECKLIST_FASE3.md`.
 """
 
 from __future__ import annotations
@@ -132,7 +134,7 @@ FRASE_MINIMA = 25
 SIMILARIDADE_DE_REPETICAO = 0.9
 
 # Alerta de alergia. Vem do banco e é imposto pelo código, não pedido ao modelo, pela mesma
-# razão que o rodapé de validação do PR 05 é imposto: medido com o assistente completo, a
+# razão que o rodapé de validação do `guardrails.py` é imposto: medido com o assistente completo, a
 # pergunta "o paciente pode receber dipirona?" para o [PACIENTE_001] — que tem dipirona
 # registrada como alergia — não mencionou a alergia em 4 de 4 tentativas. O modelo respondia
 # sobre o protocolo da condição de base e ignorava a pergunta. Um alerta que só aparece quando
@@ -295,8 +297,8 @@ def extrair_fonte(resposta: str) -> str | None:
 
     Continua linear no tamanho da resposta: uma passada só, sem retrocesso.
 
-    `None` e não string vazia: a ausência de fonte é uma informação que o PR 06 grava e o
-    relatório técnico mede como explainability. Um `""` no log seria indistinguível de uma
+    `None` e não string vazia: a ausência de fonte é uma informação que a trilha de auditoria
+    grava e o relatório técnico mede como explainability. Um `""` no log seria indistinguível de uma
     fonte que o modelo citou vazia.
     """
     texto = resposta or ""
@@ -455,13 +457,13 @@ class MedicalAssistant:
         histórico, as mesmas perguntas davam respostas 14% e 26% parecidas. Passando o
         histórico como texto dentro do bloco de dado, a similaridade cai para 24% e 10%.
 
-        A explicação é a mesma que o PR 05 usa para não mandar papel `system`: este modelo
-        foi fine-tuned em pares pergunta/resposta soltos e nunca viu conversa multi-turno. Um
-        bloco `AI: <resposta longa>` é estrutura fora da distribuição dele, e a continuação
+        A explicação é a mesma que o `src/llm/model.py` usa para não mandar papel `system`: este
+        modelo foi fine-tuned em pares pergunta/resposta soltos e nunca viu conversa multi-turno.
+        Um bloco `AI: <resposta longa>` é estrutura fora da distribuição dele, e a continuação
         mais provável diante dela é repeti-la.
 
-        O `InMemoryChatMessageHistory` por `session_id` continua sendo o armazenamento, como
-        o plano pede. O que saiu foi a `RunnableWithMessageHistory`, que só sabe injetar
+        O `InMemoryChatMessageHistory` por `session_id` continua sendo o armazenamento.
+        O que saiu foi a `RunnableWithMessageHistory`, que só sabe injetar
         mensagens — e que já estava deprecada de qualquer forma.
         """
         return ChatPromptTemplate.from_messages([("human", MEDICAL_TEMPLATE)]) | llm | StrOutputParser()
@@ -474,7 +476,7 @@ class MedicalAssistant:
     ) -> dict[str, Any]:
         """Responde uma pergunta clínica e devolve a resposta já dentro dos limites.
 
-        A ordem dos passos é a do plano do projeto, e cada um está onde está por um motivo:
+        A ordem dos passos é fixa, e cada um está onde está por um motivo:
 
         1. `sanitize_input` **antes** de qualquer outra coisa: o texto que entra no prompt é o
            saneado, e é ele que vai para o log — o original não é persistido em lugar nenhum.
@@ -596,7 +598,7 @@ class MedicalAssistant:
             # registro daquele texto. O aviso vai para a tela do notebook de demonstração e do
             # vídeo de entrega — os dois artefatos que o `audit_logger` diz precisarem ser
             # conferidos —, e o modelo cita a fonte na forma ancorada ("consulta do paciente
-            # <Nome> de <data>"), que é justamente a que o anonimizador do PR 02 pega.
+            # <Nome> de <data>"), que é justamente a que o anonimizador do pipeline de dados pega.
             warnings.warn(
                 "Fonte citada sem correspondência no contexto do paciente: "
                 f"{anonimizar_fonte(fonte)!r}. Registrada na trilha como ausente.",
@@ -605,7 +607,7 @@ class MedicalAssistant:
             fonte = None
 
         # Só a pergunta e o recorte da resposta vão para a trilha, ambos anonimizados pelo
-        # PR 06. O contexto do paciente fica de fora de propósito: ele já está no banco, e
+        # `audit_logger`. O contexto do paciente fica de fora de propósito: ele já está no banco, e
         # copiá-lo para um arquivo que é aberto no notebook e gravado no vídeo de entrega
         # espalharia dado clínico sem responder nenhuma pergunta de auditoria a mais.
         #
@@ -627,7 +629,7 @@ class MedicalAssistant:
             source=fonte,
             guardrail_triggered=resultado.guardrail_triggered,
             session_id=session_id,
-            # `fonte is not None`, e não o `resultado.tem_fonte` do PR 05: os dois medem
+            # `fonte is not None`, e não o `resultado.tem_fonte` do `guardrails.py`: os dois medem
             # explainability, mas o do guardrail responde "citou alguma coisa?" e este
             # responde "citou algo que confere com o contexto?". Gravar o do guardrail deixaria
             # a trilha com `source: null` e `tem_fonte: true` na mesma linha — duas afirmações
@@ -749,8 +751,8 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--listar", action="store_true", help="lista os pacientes e encerra")
     args = parser.parse_args(argv)
 
-    # O aviso da `RunnableWithMessageHistory` é uma decisão já tomada e registrada no
-    # checklist. Silenciar aqui, e não no `create_chain`, é o que mantém o aviso visível na
+    # O aviso da `RunnableWithMessageHistory` é uma decisão já tomada e documentada.
+    # Silenciar aqui, e não no `create_chain`, é o que mantém o aviso visível na
     # suíte de testes — que é onde ele serve para alguém lembrar de revisitar a decisão.
     warnings.filterwarnings("ignore", category=LangChainDeprecationWarning)
     load_dotenv(RAIZ / ".env")

@@ -7,7 +7,7 @@ Uso como biblioteca:
     llm = MedicalMLXLLM.from_env()      # lê BASE_MODEL, ADAPTER_PATH, MAX_TOKENS, TEMPERATURE
     resposta = llm.invoke("Qual a conduta inicial na crise asmática?")
 
-É a peça que faz o modelo do PR 04 caber no `prompt | llm` do LCEL: o PR 07 monta a chain
+É a peça que faz o modelo fine-tuned caber no `prompt | llm` do LCEL: o `chain.py` monta a chain
 com este objeto e não precisa saber que existe MLX do outro lado.
 
 O `LLM` do LangChain é um modelo Pydantic, então os parâmetros são campos declarados — não
@@ -27,7 +27,7 @@ from pydantic import ConfigDict
 
 MAX_TOKENS_PADRAO = 512
 
-# 0.7, e não os 0.2 do plano original. Medido com o assistente completo do PR 07, perguntando
+# 0.7, e não os 0.2 iniciais. Medido com o assistente completo, perguntando
 # "quais exames estão pendentes?" aos 8 primeiros pacientes e conferindo a resposta contra o
 # `get_pending_exams` do banco:
 #
@@ -35,7 +35,7 @@ MAX_TOKENS_PADRAO = 512
 #     temp=0.7 -> 6/8 de acerto factual, 45% de repetição média
 #
 # A troca é acerto por fluidez, e vale: uma resposta correta e repetitiva é revisável, uma
-# resposta fluente e errada não. O `cortar_repeticao` do PR 07 já atenua o lado que piora.
+# resposta fluente e errada não. O `cortar_repeticao` do `chain.py` já atenua o lado que piora.
 #
 # Fica aqui, e não só no `.env`, porque este é o valor que vale para quem clona o repositório
 # sem definir a variável — deixar o padrão em 0.2 faria a configuração recomendada e o
@@ -100,7 +100,7 @@ def _cortar_em_stop(texto: str, stop: list[str] | None) -> str:
 
 
 class MedicalMLXLLM(LLM):
-    """LLM do assistente médico: Llama-3.2-3B com os adapters LoRA do PR 04.
+    """LLM do assistente médico: Llama-3.2-3B com os adapters LoRA do fine-tuning.
 
     `adapter_path=None` serve o modelo base sem fine-tuning — é o que a comparação
     baseline vs fine-tuned do relatório técnico usa, e é o que `from_env(com_adapter=False)`
@@ -108,7 +108,7 @@ class MedicalMLXLLM(LLM):
     """
 
     # O Pydantic v2 reserva o prefixo `model_` para uso interno e avisa a cada instanciação
-    # de um campo chamado `model_path`. O nome vem do plano do projeto e é o que o
+    # de um campo chamado `model_path`. O nome é o que o
     # `_identifying_params` expõe, então o que cede é a proteção de namespace — que aqui não
     # protege nada: esta classe não tem nenhum atributo `model_` do próprio Pydantic.
     model_config = ConfigDict(protected_namespaces=())
@@ -133,8 +133,9 @@ class MedicalMLXLLM(LLM):
         sem esta chave o baseline seria inalcançável por aqui e, numa máquina sem adapters
         treinados, `_call` só teria o `FileNotFoundError` a oferecer.
 
-        `MAX_TOKENS` e `TEMPERATURE` estão no `.env.example` desde o PR 01 e até agora nada
-        as consumia — mesmo caso do `BASE_MODEL` que o PR 04 ligou ao `LoRAConfig`.
+        `MAX_TOKENS` e `TEMPERATURE` estão no `.env.example` desde o começo do projeto e até
+        agora nada as consumia — mesmo caso do `BASE_MODEL`, que o `LoRAConfig` do fine-tuning
+        passou a ler.
         """
         from src.fine_tuning.config import LoRAConfig
 
@@ -174,7 +175,7 @@ class MedicalMLXLLM(LLM):
         papéis user/assistant, e servir outro formato mede a diferença de template em vez do
         efeito do fine-tuning.
 
-        O prompt inteiro vai como `user` — inclusive o texto de sistema que o PR 07 monta.
+        O prompt inteiro vai como `user` — inclusive o texto de sistema que o `chain.py` monta.
         Não há papel `system` aqui de propósito: o treino não viu nenhum, e introduzir um na
         inferência coloca o modelo diante de uma estrutura que ele nunca aprendeu a seguir.
         """

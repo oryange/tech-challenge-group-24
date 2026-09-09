@@ -7,10 +7,10 @@ Uso como biblioteca:
     retriever = PatientRetriever.from_env()
     contexto = retriever.get_patient_context("[PACIENTE_007]")
 
-É a peça que transforma as quatro tabelas do PR 03 no bloco de texto que o PR 07 injeta como
-dado delimitado. A formatação mora aqui, e não no `prompts.py`, porque ela depende do formato
-das tabelas: quem mexer no schema tem de mexer na formatação junto, e as duas coisas ficando
-no mesmo arquivo isso é difícil de esquecer.
+É a peça que transforma as quatro tabelas de `src/database/models.py` no bloco de texto que o
+`chain.py` injeta como dado delimitado. A formatação mora aqui, e não no `prompts.py`, porque ela
+depende do formato das tabelas: quem mexer no schema tem de mexer na formatação junto, e as duas
+coisas ficando no mesmo arquivo isso é difícil de esquecer.
 
 Sobre as consultas ao banco: todas passam pelo ORM do SQLAlchemy, que vincula os valores como
 parâmetros. Nenhuma string de SQL é montada por concatenação ou f-string neste módulo — é o
@@ -32,7 +32,7 @@ from src.database.models import Consultation, Exam, Patient, Protocol, get_engin
 RAIZ = Path(__file__).resolve().parents[2]
 DB_PATH_PADRAO = RAIZ / "data" / "database" / "hospital.db"
 
-# Quantas consultas entram no contexto. Duas é o que o plano do projeto pede, e o número tem
+# Quantas consultas entram no contexto. São duas, e o número tem
 # razão de ser: o histórico existe para responder "o que mudou desde a última vez?", e isso
 # se responde comparando a atual com a anterior. Mais consultas empurrariam a pergunta para
 # longe do fim do prompt sem acrescentar comparação nenhuma.
@@ -43,8 +43,8 @@ CONSULTAS_NO_CONTEXTO = 2
 # serve principalmente para transformar um identificador malformado num erro claro em vez de
 # num resultado vazio silencioso, que na tela vira "paciente sem dados".
 #
-# O formato é o token que o seed do PR 03 grava em `Patient.name_anon` e que o PR 06 usa como
-# chave de filtro do audit log — os três precisam concordar.
+# O formato é o token que `src/database/seed.py` grava em `Patient.name_anon` e que a trilha de
+# auditoria usa como chave de filtro — os três precisam concordar.
 _PATIENT_ID_VALIDO = re.compile(r"^\[PACIENTE_\d{1,6}\]$")
 
 
@@ -58,7 +58,7 @@ def _formatar_data(valor: Any) -> str:
 
 
 def _lista(campo: str) -> list[str]:
-    """Quebra os campos separados por vírgula do PR 03 (`allergies`, `conditions`)."""
+    """Quebra os campos separados por vírgula de `Patient` (`allergies`, `conditions`)."""
     return [item.strip() for item in (campo or "").split(",") if item.strip()]
 
 
@@ -82,7 +82,7 @@ class PatientRetriever:
         dentro do repositório. Consertar só aqui deixaria o assistente lendo o home de verdade
         enquanto o seed continua populando o `~` literal — dois bancos diferentes, e a falha
         aparecendo como "paciente sem dados". A correção tem de sair nos dois ao mesmo tempo,
-        no arquivo do PR 03; está anotada como pendência no `CHECKLIST_FASE3.md`.
+        em `src/database/seed.py`; está anotada como pendência no `CHECKLIST_FASE3.md`.
 
         O que **não** se faz aqui é exigir que o caminho fique contido na raiz, mesma decisão
         e mesmo motivo do `config._do_ambiente`: apontar o banco para um disco externo é o
@@ -170,7 +170,7 @@ class PatientRetriever:
         juntos de propósito: o texto é o que vai para o modelo, e os campos estruturados são o
         que os testes e o notebook checam sem precisar fazer parsing do texto de volta.
 
-        Sem método novo para o histórico, como o plano pede: as duas consultas mais recentes
+        Sem método novo para o histórico: as duas consultas mais recentes
         entram no mesmo contexto, com a data visível em cada uma — é ela que permite ao
         assistente citar `[Fonte: consulta de DD/MM/AAAA]` em vez de um "segundo o histórico"
         que ninguém consegue conferir depois.

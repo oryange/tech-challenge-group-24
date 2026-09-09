@@ -20,17 +20,17 @@ do projeto: filtrado por sessão, filtrado por paciente, e exibido cru na demons
 filtro.
 
 O módulo se chama `audit` e não `logging` para não sombrear o `logging` da stdlib, como
-registrado desde o PR 01.
+registrado desde a criação do pacote.
 
 Sobre PII: a pergunta do médico é texto livre digitado na hora e pode conter nome real de
 paciente, telefone ou prontuário — dados que nenhum dos pipelines anteriores viu, porque
 eles anonimizam dataset e banco, não a conversa. Este arquivo é o único artefato que
 persiste esse texto em disco, e ainda por cima é exibido no notebook de demonstração e no
 vídeo de entrega. Por isso tudo o que é texto livre passa por `_anonimizar_conversa` antes
-de ser gravado: o `anonymize` do PR 02, mais as regras de `_PII_CONVERSA`.
+de ser gravado: o `anonymize` de `src/data/anonymizer.py`, mais as regras de `_PII_CONVERSA`.
 
 O que a anonimização daqui deliberadamente **não** garante: **nome não ancorado passa**. As
-regras do PR 02 são ancoradas em contexto ("paciente" + nome, "Dr." + nome) porque afrouxar
+regras do `anonymizer` são ancoradas em contexto ("paciente" + nome, "Dr." + nome) porque afrouxar
 isso destruiria termos legítimos do PubMedQA no dataset de treino, e a pergunta digitada na
 hora raramente traz a âncora — "Maria Silva está com febre" sai inteira no log. Detectar
 nome próprio solto por regex tem falso positivo caro em texto clínico (nome de medicamento,
@@ -38,7 +38,7 @@ de escala, de sinal clínico), então não é resolvido aqui.
 
 A anonimização deste módulo é, portanto, **best-effort**: cobre os formatos inequívocos
 (datas, e-mail, CPF, telefone, prontuário ancorado) e não cobre nome livre. Registrar isso
-importa pelo mesmo motivo que o `guardrails.py` do PR 05 registra o alcance da denylist —
+importa pelo mesmo motivo que o `src/llm/guardrails.py` registra o alcance da denylist —
 uma garantia afirmada e não cumprida é pior que um limite declarado, porque some com a
 vigilância de quem lê. Enquanto o limite valer, `logs/audit.jsonl` é dado sensível: não sai
 do repositório, e o que for exibido no notebook ou no vídeo precisa ser conferido antes.
@@ -67,8 +67,8 @@ PREVIEW_CARACTERES = 200
 
 # Teto do texto livre que chega ao `anonymize`, aplicado **antes** dele. Não é o recorte de
 # auditoria (esse é o `PREVIEW_CARACTERES`, e vem depois): é o limite do trabalho que uma
-# entrada gigante impõe às regex do PR 02, algumas das quais não são lineares. Pelo fluxo do
-# assistente o texto já chega truncado em 2000 pelo `sanitize_input` do PR 05; aqui o mesmo
+# entrada gigante impõe às regex do `anonymizer`, algumas das quais não são lineares. Pelo fluxo do
+# assistente o texto já chega truncado em 2000 pelo `sanitize_input` dos guardrails; aqui o mesmo
 # número é repetido porque `log()` é API pública — o docstring deste módulo mostra a chamada
 # direta — e um controle que depende de todo chamador ter passado por outro módulo não é
 # controle. Folgado o bastante para não interferir nas âncoras do anonimizador, que casam
@@ -91,10 +91,10 @@ MARGEM_TOKEN_PARTIDO = 64
 MODO_DIRETORIO = 0o700
 MODO_ARQUIVO = 0o600
 
-# Regras próprias da conversa, complementares ao `anonymize` do PR 02 — que fica intocado de
-# propósito: as âncoras de contexto existem lá para não destruir termos do PubMedQA, e
-# afrouxá-las degradaria o dataset de treino. Aqui o dado tem outra forma (alguém digitando
-# no chat) e outro destino (disco), então os formatos que dispensam âncora entram neste
+# Regras próprias da conversa, complementares ao `anonymize` de `src/data/anonymizer.py` — que
+# fica intocado de propósito: as âncoras de contexto existem lá para não destruir termos do
+# PubMedQA, e afrouxá-las degradaria o dataset de treino. Aqui o dado tem outra forma (alguém
+# digitando no chat) e outro destino (disco), então os formatos que dispensam âncora entram neste
 # módulo, que é quem conhece essa diferença.
 #
 # Onze dígitos soltos são ambíguos entre celular e CPF, e nenhuma regex desfaz isso sem
@@ -125,7 +125,7 @@ def _limitar_texto_livre(texto: str) -> str:
 
 
 def _anonimizar_conversa(texto: str) -> str:
-    """Anonimiza texto livre da conversa: as regras do PR 02 mais as de `_PII_CONVERSA`.
+    """Anonimiza texto livre da conversa: as regras do `anonymizer` mais as de `_PII_CONVERSA`.
 
     Não cobre nome não ancorado — ver o limite declarado no topo do módulo.
     """
@@ -269,8 +269,8 @@ def anonimizar_fonte(texto: str) -> str:
 
     O `source` é texto livre gerado pelo modelo e precisa da mesma anonimização dos outros
     campos — o modelo cita `[Fonte: consulta do paciente Joao Souza de 12/03/2026]`, que é
-    justamente a forma **ancorada** que as regras do PR 02 sabem pegar. Sem isso o mesmo trecho
-    saía anonimizado em `response_preview` e em claro em `source`, na mesma linha do arquivo.
+    justamente a forma **ancorada** que as regras do `anonymizer` sabem pegar. Sem isso o mesmo
+    trecho saía anonimizado em `response_preview` e em claro em `source`, na mesma linha do arquivo.
 
     A data, porém, volta. O `anonymize` redige data junto com nome, e aplicá-lo inteiro trocava
     um vazamento por uma perda: `"consulta de [DATA]"` não diz de qual consulta a resposta
@@ -364,7 +364,7 @@ class AuditLogger:
         casar e o fragmento restante ser gravado em claro.
 
         `patient_id` não passa pela anonimização porque já é um token — `[PACIENTE_007]`,
-        gerado pelo seed do PR 03. Anonimizá-lo destruiria a chave de filtro do
+        gerado por `src/database/seed.py`. Anonimizá-lo destruiria a chave de filtro do
         `get_patient_logs` sem proteger dado nenhum.
 
         O teto de `LIMITE_TEXTO_LIVRE` é o único corte que vem **antes** da anonimização, e
@@ -375,20 +375,20 @@ class AuditLogger:
 
         `source` também é texto livre e também é anonimizado, com a data preservada — o porquê
         de cada metade está em `_anonimizar_fonte`. O `or None` no fim mantém a distinção entre
-        "não citou fonte" e "citou uma fonte vazia", que o `extrair_fonte` do PR 07 preserva.
+        "não citou fonte" e "citou uma fonte vazia", que o `extrair_fonte` do `chain.py` preserva.
 
-        `tem_fonte` e `motivos` recebem o resto do `ResultadoGuardrails` do PR 05. Eles têm
-        default e a assinatura do checklist continua valendo, mas sem eles a métrica de
-        explainability — que é requisito do enunciado — seria calculada no PR 05 e não
+        `tem_fonte` e `motivos` recebem o resto do `ResultadoGuardrails` dos guardrails. Eles têm
+        default, então a assinatura documentada continua valendo, mas sem eles a métrica de
+        explainability — que é requisito do enunciado — seria calculada nos guardrails e não
         chegaria a nenhum lugar persistido. `tem_fonte=None` distingue "não foi medido" de
         "não tinha fonte", que numa auditoria são conclusões diferentes.
 
         `alergias_alertadas` é campo próprio, e não parte da resposta gravada, pelo mesmo
-        motivo: o carimbo determinístico do PR 07 ocupa dois terços do recorte de auditoria com
+        motivo: o carimbo determinístico do `chain.py` ocupa dois terços do recorte de auditoria com
         um texto reconstruível a partir de `patient_id` mais o prontuário. Em campo separado
         ele não come o recorte e ainda deixa a trilha filtrável por "houve alerta".
 
-        O mesmo vale para as marcas do guardrail, e é o chamador quem decide: o `ask` do PR 07
+        O mesmo vale para as marcas do guardrail, e é o chamador quem decide: o `ask` do `chain.py`
         passa em `response` o texto do modelo **antes** do carimbo de alergia, do rodapé de
         validação e do `AVISO_PRESCRICAO`. Os três são determinísticos e este `log()` já recebe
         o que os reconstrói (`guardrail_triggered`, `motivos`, `alergias_alertadas`); só o

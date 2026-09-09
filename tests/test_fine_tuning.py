@@ -62,7 +62,7 @@ def test_to_mlx_args_traz_os_hiperparametros_do_plano():
 
 
 def test_max_seq_length_comporta_o_dataset():
-    # Desvio deliberado do plano, que previa 512. Medido nos 903 exemplos de treino: com 512,
+    # Desvio deliberado do valor inicial, que era 512. Medido nos 903 exemplos de treino: com 512,
     # 46 sequências ficam sem nenhum token de resposta após o truncamento e a loss vira NaN
     # (reproduzido numa rodada real). O maior exemplo tem 875 tokens.
     assert LoRAConfig().max_seq_length == 1024
