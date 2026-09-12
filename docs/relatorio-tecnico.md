@@ -10,7 +10,7 @@ LangGraph.
 | Repositório | https://github.com/oryange/tech-challenge-group-24 |
 | Modelo base | `meta-llama/Llama-3.2-3B-Instruct` |
 | Adapter demonstrado | `data/fine_tuned/adapters` (500 iterações) |
-| Vídeo | _(link adicionado no PR 11)_ |
+| Vídeo | _(colar o link aqui antes do merge)_ |
 
 ---
 
@@ -418,9 +418,9 @@ assistente usa em produção nunca apareceu no treino. Que a célula 5 funcione 
 capacidade de leitura de contexto que o modelo base já tinha, não do fine-tuning.
 
 **Desequilíbrio 89,9% / 10,1% entre inglês e português.** O treino é dominado por PubMedQA
-enquanto o uso é em português sobre protocolo interno. A alucinação medida no P2 do checklist —
-"meta de glicemia below 6.5 mmol/l", com palavra em inglês e unidade errada (hemoglobina glicada
-é em %) — é o sintoma direto.
+enquanto o uso é em português sobre protocolo interno. A alucinação medida durante a integração
+— "meta de glicemia below 6.5 mmol/l", com palavra em inglês e unidade errada (hemoglobina
+glicada é medida em %) — é o sintoma direto.
 
 **O guardrail de prescrição casa radicais, não intenção.** `check_prescription_attempt` detecta
 `prescr*`, `receit*` e `administr*`. Posologia escrita sem nenhum desses radicais não é
@@ -499,8 +499,8 @@ estaria certificando a própria alucinação. A seção 8.3 é o caso real.
 
 ### 9.4 Revisão de segurança
 
-O código passou por revisão de segurança em duas rodadas (P3 e P6 do `CHECKLIST_FASE3.md`):
-**0 críticos, 0 altos**. Compliant em SQL injection pelo `patient_id` (ORM com parâmetros
+O código passou por revisão de segurança em duas rodadas, a segunda sobre as correções da
+primeira: **0 críticos, 0 altos**. Compliant em SQL injection pelo `patient_id` (ORM com parâmetros
 vinculados mais allowlist), log injection no JSONL (`json.dumps` escapa quebras e aspas), regex
 sem quantificador aninhado (ReDoS) e camada estrutural de prompt injection
 (`neutralizar_delimitadores`).

@@ -82,7 +82,8 @@ class PatientRetriever:
         dentro do repositório. Consertar só aqui deixaria o assistente lendo o home de verdade
         enquanto o seed continua populando o `~` literal — dois bancos diferentes, e a falha
         aparecendo como "paciente sem dados". A correção tem de sair nos dois ao mesmo tempo,
-        em `src/database/seed.py`; está anotada como pendência no `CHECKLIST_FASE3.md`.
+        em `src/database/seed.py`; está anotada entre os itens conhecidos e não corrigidos, na
+        seção de segurança de `docs/relatorio-tecnico.md`.
 
         O que **não** se faz aqui é exigir que o caminho fique contido na raiz, mesma decisão
         e mesmo motivo do `config._do_ambiente`: apontar o banco para um disco externo é o

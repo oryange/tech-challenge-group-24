@@ -195,6 +195,7 @@ geração. O porquê, e o resto da análise, está no relatório:
 - 📊 **[Diagramas](docs/diagramas.md)** — arquitetura, pipeline LangChain e fluxo LangGraph
 - 🔬 **[Demonstração executada](notebooks/03_langchain_demo.ipynb)** — as sete células com
   output visível
+- 🎥 **Vídeo de demonstração** — _(colar o link aqui antes do merge)_
 
 ## Testes
 
@@ -263,7 +264,6 @@ tech-challenge-group-24/
 ├── .env.example
 ├── .gitignore
 ├── .pre-commit-config.yaml
-├── CHECKLIST_FASE3.md
 ├── requirements.txt
 ├── pytest.ini
 └── README.md
