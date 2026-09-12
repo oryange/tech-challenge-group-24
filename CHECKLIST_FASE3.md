@@ -669,7 +669,7 @@ tech-challenge-group-24/
 
 ---
 
-### PR 09 — Notebooks de demo e documentação
+### PR 09 — Notebooks de demo e documentação ✅
 **Responsável:** Pessoa A ou B (podem dividir)  
 **Entrega:** notebooks executados + documentação completa  
 **Branch:** `feat/pr09-docs-demo`
@@ -688,56 +688,56 @@ de auditoria hoje — `logs/*` ignorado, `chmod 0600` do P6 e a anonimização d
 antecipou este ponto ("o arquivo é aberto no notebook e gravado no vídeo"); é aqui que ele
 deixa de ser hipótese.
 
-- [ ] Nenhuma célula lê `logs/audit.jsonl` direto (`open`, `read_json`, `cat`). A trilha se
+- [x] Nenhuma célula lê `logs/audit.jsonl` direto (`open`, `read_json`, `cat`). A trilha se
       consulta por `AuditLogger.from_env().get_session_logs(session_id)`, com o `session_id`
       **da própria demo** — o arquivo acumula execuções anteriores que ninguém revisou
-- [ ] A exibição da trilha projeta uma allowlist de campos: `timestamp`, `patient_id`,
+- [x] A exibição da trilha projeta uma allowlist de campos: `timestamp`, `patient_id`,
       `session_id`, `guardrail_triggered`, `motivos`, `tem_fonte`, `source`,
       `alergias_alertadas`. São metadados e flags, que é o que responde as perguntas de
       auditoria da demo ("houve guardrail?", "citou fonte?", "de qual paciente?"). O `source` é
       a única exceção — é texto do modelo —, mas passa pelo `anonimizar_fonte` e vira `None`
       quando não confere com o contexto (`chain.py:591-594`), então entra na allowlist
-- [ ] `response_preview` e `query` **não** são exibidos. São os dois campos de texto livre
+- [x] `response_preview` e `query` **não** são exibidos. São os dois campos de texto livre
       derivados do contexto clínico, e o recorte de 200 caracteres do `response_preview` é
       exatamente o que o P3 deixou registrado como decisão pendente do PR 06
-- [ ] As perguntas da demo usam só `[PACIENTE_00N]`, nunca nome de pessoa — nem inventado. O
+- [x] As perguntas da demo usam só `[PACIENTE_00N]`, nunca nome de pessoa — nem inventado. O
       `anonymize` do PR 02 é denylist **ancorada em contexto**: "João Silva ainda está com
       febre?" vai em claro para a trilha e daí para o output committado (P3)
-- [ ] Nenhuma célula com `os.environ`, `%env`, `print(os.getenv("HF_TOKEN"))` ou
+- [x] Nenhuma célula com `os.environ`, `%env`, `print(os.getenv("HF_TOKEN"))` ou
       `hf auth whoami`. Só `load_dotenv()`. O `_identifying_params` do LLM é seguro de exibir:
       só caminho de modelo, adapter, revision, `max_tokens` e `temperature`
-- [ ] Gate no `.pre-commit-config.yaml`, que hoje é literalmente `repos: []`. Um `nbstripout`
+- [x] Gate no `.pre-commit-config.yaml`, que hoje é literalmente `repos: []`. Um `nbstripout`
       global não serve (o PR 10 exige output visível); o hook útil falha quando o output de
       qualquer notebook casa `response_preview`, `['"]query['"]\s*:` ou `hf_[A-Za-z0-9]`. O
       padrão do `query` cobre as duas aspas: o `get_session_logs` devolve `list[dict]`
       (`audit_logger.py:460`) e um `pprint` da lista sai com `'query':`, aspas simples
-- [ ] Nenhuma célula vai committada com traceback. Exceção que suba do carregamento do modelo
+- [x] Nenhuma célula vai committada com traceback. Exceção que suba do carregamento do modelo
       leva caminho resolvido no output e, em erro de cliente HF, o token na URL da requisição
 
 #### `notebooks/03_langchain_demo.ipynb`
 
-- [ ] Célula 1: setup e imports (`load_dotenv`, sem imprimir ambiente)
-- [ ] Célula 2: inicializa `MedicalAssistant.from_env()` e exibe
+- [x] Célula 1: setup e imports (`load_dotenv`, sem imprimir ambiente)
+- [x] Célula 2: inicializa `MedicalAssistant.from_env()` e exibe
       `assistant.llm._identifying_params` — a propriedade é do `MedicalMLXLLM`
       (`model.py:156`), não do assistente, e chega pelo `self.llm` (`chain.py:389`). É o que
       prova, na entrega, qual adapter respondeu as células seguintes
-- [ ] Célula 3: pergunta clínica simples. **Não afirmar que a fonte sai sempre citada**: o P2
+- [x] Célula 3: pergunta clínica simples. **Não afirmar que a fonte sai sempre citada**: o P2
       mediu 10% de citação no treino e citação malformada na inferência (`[Fonte:CID A09]`), e
       o que o notebook mostra é o que saiu. A célula descreve o observado; a interpretação vai
       para a análise do relatório
-- [ ] Célula 4: tentativa de prescrição → guardrail ativa. A pergunta tem de conter radical
+- [x] Célula 4: tentativa de prescrição → guardrail ativa. A pergunta tem de conter radical
       `prescr*`/`receit*`/`administr*` ("posso prescrever ...?"): o P4 registra que
       `check_prescription_attempt` não pega posologia sem radical, e a frase natural
       demonstraria o guardrail falhando na entrega. O alcance da denylist é tratado em texto no
       relatório, **sem** publicar o payload que fura nem o do rodapé forjável do P4
-- [ ] Célula 5: consulta com `patient_id` → contexto injetado. Confirmar o identificador antes
+- [x] Célula 5: consulta com `patient_id` → contexto injetado. Confirmar o identificador antes
       com `PatientRetriever.listar_pacientes()`: `ask` deixa `PacienteNaoEncontrado` subir de
       propósito
-- [ ] Célula 6: fluxo LangGraph nos **dois** ramos da borda condicional — paciente `13`
+- [x] Célula 6: fluxo LangGraph nos **dois** ramos da borda condicional — paciente `13`
       (3 pendentes → `alert_team`, sem chamar o modelo) e paciente `2` (0 pendentes →
       `suggest_treatment`), os dois já verificados no PR 08. Um paciente só exercita metade do
       grafo, e a condicional é entregável explícito
-- [ ] Célula 7: trilha da sessão da demo, sob as regras da seção acima
+- [x] Célula 7: trilha da sessão da demo, sob as regras da seção acima
 
 #### `docs/relatorio-tecnico.md` — relatório obrigatório da Fase 3
 
@@ -752,22 +752,22 @@ que não exista uma segunda versão deles digitada de memória em algum lugar do
 
 Delta do reportado contra o baseline: **+0,1157 ROUGE-L / +12,65 BLEU-4**.
 
-- [ ] Introdução e objetivo
-- [ ] Arquitetura geral do sistema
-- [ ] Processo de fine-tuning: `meta-llama/Llama-3.2-3B-Instruct`, LoRA de 8 camadas, rank 8,
+- [x] Introdução e objetivo
+- [x] Arquitetura geral do sistema
+- [x] Processo de fine-tuning: `meta-llama/Llama-3.2-3B-Instruct`, LoRA de 8 camadas, rank 8,
       alpha 16, lr 1e-4, 500 iterações, batch 4, `max_seq_length` 1024, seed 42 — números do
       `config` de `docs/evaluation_results.json`, não de memória
-- [ ] Descrição do assistente médico e do pipeline LangChain
-- [ ] **Diagrama do fluxo LangChain** (Mermaid) — é este o diagrama que o enunciado exige
+- [x] Descrição do assistente médico e do pipeline LangChain
+- [x] **Diagrama do fluxo LangChain** (Mermaid) — é este o diagrama que o enunciado exige
       nominalmente entre os itens do relatório, não o do LangGraph. O do LangGraph entra junto
       porque o fluxo é entregável de código e o vídeo o demonstra, mas o obrigatório é o do
       LangChain; os dois estão em `docs/diagramas.md`
-- [ ] Avaliação do modelo — as **três** séries da tabela acima, sobre 50 amostras, e o delta
-- [ ] Declarar qual adapter o sistema demonstrado carrega. O `ADAPTER_PATH` default é
+- [x] Avaliação do modelo — as **três** séries da tabela acima, sobre 50 amostras, e o delta
+- [x] Declarar qual adapter o sistema demonstrado carrega. O `ADAPTER_PATH` default é
       `data/fine_tuned/adapters` (`src/fine_tuning/config.py:153`), então a métrica reportada é
       a do sistema que o vídeo grava — o que só vale se estiver escrito
-- [ ] Curvas de loss a partir de `docs/training_history.json`
-- [ ] Análise dos resultados — o enunciado pede avaliação **e** análise, então não basta
+- [x] Curvas de loss a partir de `docs/training_history.json`
+- [x] Análise dos resultados — o enunciado pede avaliação **e** análise, então não basta
       tabelar:
   - o checkpoint de melhor validation loss (iter 200) pontua **pior** nas duas métricas de
     geração que o de iter 500: menor loss de validação não é melhor geração, e é o achado mais
@@ -778,12 +778,12 @@ Delta do reportado contra o baseline: **+0,1157 ROUGE-L / +12,65 BLEU-4**.
     que citam fonte (P2) — é o que explica o modelo recitar protocolo em vez de responder. As
     limitações estruturais (903 exemplos, 3B parâmetros, LoRA de 8 camadas) entram junto, não
     no lugar
-- [ ] Segurança: guardrails, logging, explainability. Apontar para P3–P6 como registro das
+- [x] Segurança: guardrails, logging, explainability. Apontar para P3–P6 como registro das
       decisões, incluindo os itens abertos — documentar limitação medida é análise; publicar o
       payload que a contorna, não
-- [ ] Declarar que não há dado real de paciente no repositório, com o limite da garantia que o
+- [x] Declarar que não há dado real de paciente no repositório, com o limite da garantia que o
       próprio `.gitignore` documenta: só o `dataset.jsonl` passa pelo anonimizador
-- [ ] Conclusão e trabalhos futuros
+- [x] Conclusão e trabalhos futuros
 
 #### `docs/diagramas.md`
 
@@ -802,16 +802,62 @@ Delta do reportado contra o baseline: **+0,1157 ROUGE-L / +12,65 BLEU-4**.
 As sete seções pedidas no plano original já existem desde os PRs 01–08. O que falta é o que o
 PR 09 cria:
 
-- [ ] Corrigir as duas referências a arquivos que ainda não existem:
+- [x] Corrigir as duas referências a arquivos que ainda não existem:
       `docs/relatorio-tecnico.md` e `notebooks/03_langchain_demo.ipynb` — o `docs/diagramas.md`
       é criado por este PR
-- [ ] Seção de resultados com a tabela de métricas e o link para o relatório técnico
-- [ ] Conferir que a sequência do pipeline do README (oito comandos) continua sendo a que se
+- [x] Seção de resultados com a tabela de métricas e o link para o relatório técnico
+- [x] Conferir que a sequência do pipeline do README (oito comandos) continua sendo a que se
       executa de fato
 
 #### Fechamento
 
-- [ ] Atualizar este arquivo: marcar o PR 09 e registrar o que saiu diferente do plano
+- [x] Atualizar este arquivo: marcar o PR 09 e registrar o que saiu diferente do plano
+
+#### O que saiu diferente do plano
+
+Seis desvios, todos descobertos executando o que o plano mandava executar.
+
+**1. O padrão de token do gate ficou mais estreito que o pedido.** O plano pedia `hf_` seguido
+de um alfanumérico. Rodar o gate sobre o repositório encontrou `tests/test_fine_tuning.py:328`,
+que usa `hf_token_de_teste` num teste de regressão legítimo — ele afirma que o token real não
+chega ao YAML do LoRA. O padrão passou a exigir o formato real (`hf_` + 20 ou mais
+alfanuméricos **sem** sublinhado). Estreitar um gate de segredo é a direção arriscada, e é por
+isso que o desvio 2 entrou junto.
+
+**2. Entrou uma quinta regra que não estava no plano: `segredo-do-env`.** Ela lê os valores de
+segredo do `.env` local e confere se algum aparece literalmente no arquivo. Pega qualquer
+segredo, de qualquer formato e qualquer tamanho — inclusive os que o padrão `hf_` não
+reconheceria. É oportunista: em clone limpo e em CI não há `.env` e ela simplesmente não roda.
+O gate também passou a reprovar traceback committado, que o plano listava como regra de célula
+mas não como regra do hook.
+
+**3. O gate ganhou 16 testes.** Não estavam no plano. Um controle de segurança sem teste é um
+controle que ninguém percebe quando para de funcionar, e este só é exercitado no dia em que
+alguém erra. O caso negativo mais importante está coberto: `response_preview` citado num
+comentário da fonte **não** reprova — reprovar isso castigaria a documentação que mantém a
+allowlist viva.
+
+**4. A composição do dataset estava errada no plano, e a correção melhorou o argumento.** A
+divisão do treino é **812/91** (89,9% / 10,1%), não 808/95. E os 91 exemplos que citam fonte
+são **exatamente** os 91 sintéticos em português: nenhum dos 812 do PubMedQA cita, e todos os
+sintéticos citam. A correlação perfeita explica a citação improvisada melhor do que a
+porcentagem sozinha explicava. A afirmação de "zero exemplos com dado estruturado de paciente"
+foi reconferida e se sustenta — uma primeira regex acusou 11, que eram substring de
+"qualidade" e "atividade".
+
+**5. A `TEMPERATURE` local estava em 0.2 e foi alinhada a 0.7 antes de executar o notebook.** O
+`.env.example` declara 0.7 desde o P1, mas o `.env` da máquina que roda a demonstração nunca
+foi atualizado. Sem o alinhamento, o notebook e o vídeo teriam saído na configuração que o
+próprio P1 mediu como pior, enquanto o repositório distribui outra — e o PR 10 valida o clone
+limpo, que usa o `.env.example`.
+
+**6. O diagrama do fluxo LangChain foi duplicado no relatório**, em vez de linkado. O enunciado
+o pede nominalmente **entre os itens do relatório técnico**, e um entregável não deveria
+depender de seguir um link para existir. As duas cópias são byte a byte idênticas e o
+`diagramas.md` ganhou um aviso apontando a duplicação, para que não derivem em silêncio.
+
+**Fica aberto:** conferir a renderização dos três Mermaid no GitHub. Só se confere com a branch
+publicada, então é o primeiro item a olhar quando o PR abrir — e já é item da revisão do PR 10.
 
 **Dependências de outras PRs:** PRs 02, 04, 07, 08
 
