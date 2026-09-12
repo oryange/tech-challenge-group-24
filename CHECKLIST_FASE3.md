@@ -671,77 +671,204 @@ tech-challenge-group-24/
 
 ### PR 09 — Notebooks de demo e documentação
 **Responsável:** Pessoa A ou B (podem dividir)  
-**Entrega:** notebooks executados + documentação completa
+**Entrega:** notebooks executados + documentação completa  
+**Branch:** `feat/pr09-docs-demo`
 
-- [ ] `notebooks/03_langchain_demo.ipynb`
-  - Célula 1: setup e imports
-  - Célula 2: inicializa `MedicalAssistant` com modelo fine-tuned
-  - Célula 3: pergunta clínica simples → resposta com fonte citada
-  - Célula 4: tentativa de prescrição direta → guardrail ativa
-  - Célula 5: consulta com `patient_id` → contexto do paciente injetado
-  - Célula 6: executa fluxo LangGraph completo para um paciente
-  - Célula 7: exibe `logs/audit.jsonl` com as interações registradas
+> **Pré-requisito:** PRs 02, 04, 07 e 08 mergeados. Os insumos já estão no disco e não
+> precisam ser regerados: `data/fine_tuned/adapters/` (iter 500, o que o `ADAPTER_PATH`
+> default carrega), `data/fine_tuned/adapters_best/` (iter 200), `docs/evaluation_results.json`
+> e `docs/training_history.json`.
 
-- [ ] `docs/relatorio-tecnico.md` — relatório obrigatório da Fase 3:
-  - Introdução e objetivo
-  - Arquitetura geral do sistema
-  - Processo de fine-tuning (modelo, dados, técnica LoRA, hiperparâmetros)
-  - Descrição do assistente médico e do pipeline LangChain
-  - Diagrama do fluxo LangGraph (Mermaid)
-  - Avaliação do modelo: métricas ROUGE-L e BLEU-4, baseline vs fine-tuned
-    (números vindos de `docs/evaluation_results.json`)
-  - Análise dos resultados — o enunciado pede avaliação **e** análise, então não basta
-    tabelar: interpretar onde o fine-tuning melhorou e onde não, com exemplos de respostas
-    antes/depois, hipóteses para os casos ruins e limitações (tamanho do dataset, 3B
-    parâmetros, LoRA de 8 camadas)
-  - Segurança: guardrails, logging, explainability
-  - Conclusão e trabalhos futuros
+#### Regras do notebook committado — valem para as sete células
 
-- [ ] `docs/diagramas.md`
-  - Diagrama Mermaid do pipeline LangChain
-  - Diagrama Mermaid do fluxo LangGraph
+O notebook é entregue **com output visível** (exigência do enunciado, cobrada no PR 10), e o
+output de notebook vai para o histórico do git: sem `.gitignore`, sem permissão de arquivo e
+sem remoção possível depois. Isso contorna de uma vez os três controles que protegem a trilha
+de auditoria hoje — `logs/*` ignorado, `chmod 0600` do P6 e a anonimização do `log()`. O P3
+antecipou este ponto ("o arquivo é aberto no notebook e gravado no vídeo"); é aqui que ele
+deixa de ser hipótese.
 
-- [ ] `README.md` completo:
-  - Descrição do projeto
-  - Pré-requisitos (Python 3.11+, Apple Silicon recomendado, HuggingFace token)
-  - Instalação passo a passo
-  - Como rodar o pipeline completo (5 comandos em sequência)
-  - Como rodar os testes (`pytest tests/`)
-  - Estrutura do projeto
-  - Equipe
+- [ ] Nenhuma célula lê `logs/audit.jsonl` direto (`open`, `read_json`, `cat`). A trilha se
+      consulta por `AuditLogger.from_env().get_session_logs(session_id)`, com o `session_id`
+      **da própria demo** — o arquivo acumula execuções anteriores que ninguém revisou
+- [ ] A exibição da trilha projeta uma allowlist de campos: `timestamp`, `patient_id`,
+      `session_id`, `guardrail_triggered`, `motivos`, `tem_fonte`, `source`,
+      `alergias_alertadas`. São metadados e flags, que é o que responde as perguntas de
+      auditoria da demo ("houve guardrail?", "citou fonte?", "de qual paciente?"). O `source` é
+      a única exceção — é texto do modelo —, mas passa pelo `anonimizar_fonte` e vira `None`
+      quando não confere com o contexto (`chain.py:591-594`), então entra na allowlist
+- [ ] `response_preview` e `query` **não** são exibidos. São os dois campos de texto livre
+      derivados do contexto clínico, e o recorte de 200 caracteres do `response_preview` é
+      exatamente o que o P3 deixou registrado como decisão pendente do PR 06
+- [ ] As perguntas da demo usam só `[PACIENTE_00N]`, nunca nome de pessoa — nem inventado. O
+      `anonymize` do PR 02 é denylist **ancorada em contexto**: "João Silva ainda está com
+      febre?" vai em claro para a trilha e daí para o output committado (P3)
+- [ ] Nenhuma célula com `os.environ`, `%env`, `print(os.getenv("HF_TOKEN"))` ou
+      `hf auth whoami`. Só `load_dotenv()`. O `_identifying_params` do LLM é seguro de exibir:
+      só caminho de modelo, adapter, revision, `max_tokens` e `temperature`
+- [ ] Gate no `.pre-commit-config.yaml`, que hoje é literalmente `repos: []`. Um `nbstripout`
+      global não serve (o PR 10 exige output visível); o hook útil falha quando o output de
+      qualquer notebook casa `response_preview`, `['"]query['"]\s*:` ou `hf_[A-Za-z0-9]`. O
+      padrão do `query` cobre as duas aspas: o `get_session_logs` devolve `list[dict]`
+      (`audit_logger.py:460`) e um `pprint` da lista sai com `'query':`, aspas simples
+- [ ] Nenhuma célula vai committada com traceback. Exceção que suba do carregamento do modelo
+      leva caminho resolvido no output e, em erro de cliente HF, o token na URL da requisição
+
+#### `notebooks/03_langchain_demo.ipynb`
+
+- [ ] Célula 1: setup e imports (`load_dotenv`, sem imprimir ambiente)
+- [ ] Célula 2: inicializa `MedicalAssistant.from_env()` e exibe
+      `assistant.llm._identifying_params` — a propriedade é do `MedicalMLXLLM`
+      (`model.py:156`), não do assistente, e chega pelo `self.llm` (`chain.py:389`). É o que
+      prova, na entrega, qual adapter respondeu as células seguintes
+- [ ] Célula 3: pergunta clínica simples. **Não afirmar que a fonte sai sempre citada**: o P2
+      mediu 10% de citação no treino e citação malformada na inferência (`[Fonte:CID A09]`), e
+      o que o notebook mostra é o que saiu. A célula descreve o observado; a interpretação vai
+      para a análise do relatório
+- [ ] Célula 4: tentativa de prescrição → guardrail ativa. A pergunta tem de conter radical
+      `prescr*`/`receit*`/`administr*` ("posso prescrever ...?"): o P4 registra que
+      `check_prescription_attempt` não pega posologia sem radical, e a frase natural
+      demonstraria o guardrail falhando na entrega. O alcance da denylist é tratado em texto no
+      relatório, **sem** publicar o payload que fura nem o do rodapé forjável do P4
+- [ ] Célula 5: consulta com `patient_id` → contexto injetado. Confirmar o identificador antes
+      com `PatientRetriever.listar_pacientes()`: `ask` deixa `PacienteNaoEncontrado` subir de
+      propósito
+- [ ] Célula 6: fluxo LangGraph nos **dois** ramos da borda condicional — paciente `13`
+      (3 pendentes → `alert_team`, sem chamar o modelo) e paciente `2` (0 pendentes →
+      `suggest_treatment`), os dois já verificados no PR 08. Um paciente só exercita metade do
+      grafo, e a condicional é entregável explícito
+- [ ] Célula 7: trilha da sessão da demo, sob as regras da seção acima
+
+#### `docs/relatorio-tecnico.md` — relatório obrigatório da Fase 3
+
+Os números que o relatório reporta, lidos de `docs/evaluation_results.json` — ficam aqui para
+que não exista uma segunda versão deles digitada de memória em algum lugar do repositório:
+
+| Série | Adapter | ROUGE-L | BLEU-4 |
+|---|---|---|---|
+| baseline | `null` | 0,1746 | 3,42 |
+| fine-tuned (iter 500) | `data/fine_tuned/adapters` | 0,2904 | 16,08 |
+| best checkpoint (iter 200, val_loss 1,672) | `data/fine_tuned/adapters_best` | 0,2741 | 12,61 |
+
+Delta do reportado contra o baseline: **+0,1157 ROUGE-L / +12,65 BLEU-4**.
+
+- [ ] Introdução e objetivo
+- [ ] Arquitetura geral do sistema
+- [ ] Processo de fine-tuning: `meta-llama/Llama-3.2-3B-Instruct`, LoRA de 8 camadas, rank 8,
+      alpha 16, lr 1e-4, 500 iterações, batch 4, `max_seq_length` 1024, seed 42 — números do
+      `config` de `docs/evaluation_results.json`, não de memória
+- [ ] Descrição do assistente médico e do pipeline LangChain
+- [ ] **Diagrama do fluxo LangChain** (Mermaid) — é este o diagrama que o enunciado exige
+      nominalmente entre os itens do relatório, não o do LangGraph. O do LangGraph entra junto
+      porque o fluxo é entregável de código e o vídeo o demonstra, mas o obrigatório é o do
+      LangChain; os dois estão em `docs/diagramas.md`
+- [ ] Avaliação do modelo — as **três** séries da tabela acima, sobre 50 amostras, e o delta
+- [ ] Declarar qual adapter o sistema demonstrado carrega. O `ADAPTER_PATH` default é
+      `data/fine_tuned/adapters` (`src/fine_tuning/config.py:153`), então a métrica reportada é
+      a do sistema que o vídeo grava — o que só vale se estiver escrito
+- [ ] Curvas de loss a partir de `docs/training_history.json`
+- [ ] Análise dos resultados — o enunciado pede avaliação **e** análise, então não basta
+      tabelar:
+  - o checkpoint de melhor validation loss (iter 200) pontua **pior** nas duas métricas de
+    geração que o de iter 500: menor loss de validação não é melhor geração, e é o achado mais
+    interessante da rodada
+  - exemplos de resposta antes/depois (os `examples` de cada série no JSON)
+  - limitações **medidas**, não genéricas: o desequilíbrio 89/11 entre PubMedQA e sintéticos,
+    os **zero** exemplos de treino que respondem sobre dado estruturado de paciente e os 10%
+    que citam fonte (P2) — é o que explica o modelo recitar protocolo em vez de responder. As
+    limitações estruturais (903 exemplos, 3B parâmetros, LoRA de 8 camadas) entram junto, não
+    no lugar
+- [ ] Segurança: guardrails, logging, explainability. Apontar para P3–P6 como registro das
+      decisões, incluindo os itens abertos — documentar limitação medida é análise; publicar o
+      payload que a contorna, não
+- [ ] Declarar que não há dado real de paciente no repositório, com o limite da garantia que o
+      próprio `.gitignore` documenta: só o `dataset.jsonl` passa pelo anonimizador
+- [ ] Conclusão e trabalhos futuros
+
+#### `docs/diagramas.md`
+
+- [x] Diagrama Mermaid da arquitetura geral — o relatório tem a seção e nada a alimentava
+- [x] Diagrama Mermaid do pipeline LangChain
+- [x] Diagrama Mermaid do fluxo LangGraph, com os cinco nós reais e a borda condicional
+      `check_exams → alert_team | suggest_treatment` (`src/graph/clinical_flow.py:371`). Fluxo
+      linear não representa o que foi entregue
+- [ ] Conferir a renderização dos três no GitHub. Sintaxe já validada em mermaid 10.9.8 e
+      11.17.2 — os três parseiam nas duas versões, incluindo o `|` dentro do label do `CHAIN`,
+      as arestas pontilhadas com label, os `<br/>` e a referência a nó antes da definição.
+      Falta o layout, que não roda headless, e conferir qual versão o GitHub usa hoje
+
+#### `README.md` — revisar, não reescrever
+
+As sete seções pedidas no plano original já existem desde os PRs 01–08. O que falta é o que o
+PR 09 cria:
+
+- [ ] Corrigir as duas referências a arquivos que ainda não existem:
+      `docs/relatorio-tecnico.md` e `notebooks/03_langchain_demo.ipynb` — o `docs/diagramas.md`
+      é criado por este PR
+- [ ] Seção de resultados com a tabela de métricas e o link para o relatório técnico
+- [ ] Conferir que a sequência do pipeline do README (oito comandos) continua sendo a que se
+      executa de fato
+
+#### Fechamento
+
+- [ ] Atualizar este arquivo: marcar o PR 09 e registrar o que saiu diferente do plano
 
 **Dependências de outras PRs:** PRs 02, 04, 07, 08
 
 ---
 
-### PR 10 — Integração final e testes de ponta a ponta
-**Responsável:** Pessoa A ou B juntas  
-**Entrega:** projeto completo, todos os testes passando
+### PR 10 — Validação a partir de um clone limpo
+**Responsável:** quem não escreveu o PR 09  
+**Entrega:** confirmação de que o projeto funciona para quem chega de fora
 
-- [ ] Rodar `pytest tests/` — todos os testes passam (exceto `@integration`)
-- [ ] Executar o pipeline completo de ponta a ponta:
-  1. `python -m src.data.loader`
-  2. `python -m src.data.synthetic_generator`
-  3. `python -m src.data.curator`
-  4. `python -m src.database.seed`
-  5. `python -m src.assistant.chain` (interativo)
-- [ ] Executar fluxo LangGraph: `python -m src.graph.clinical_flow`
-- [ ] Verificar `logs/audit.jsonl` com registros reais
-- [ ] Executar fine-tuning: `python -m src.fine_tuning.trainer` (pode ser rodado uma vez
-      localmente e commitado o notebook executado)
-- [ ] Executar a avaliação: `python -m src.fine_tuning.evaluator`
-  - confirmar que `docs/evaluation_results.json` foi gerado com as métricas baseline vs
-    fine-tuned — é a fonte dos números do relatório técnico e da demonstração do vídeo
-- [ ] Revisar todos os notebooks — garantir que estão executados com output visível
-- [ ] Revisão final do `docs/relatorio-tecnico.md`
+> **Pré-requisito:** PR 09 mergeado.
+
+Este PR não reexecuta o que o PR 09 já executou. Para o notebook sair com output, o PR 09
+roda o modelo, o banco, o assistente e o grafo — repetir isso na mesma máquina não descobre
+nada. O que sobra é o que o PR 09 não consegue fazer por definição, e são duas coisas: rodar
+**a partir de um clone limpo**, onde `data/`, `venv/` e `.env` não estão montados há semanas, e
+ser revisado por **outra pessoa**. É a mesma razão pela qual o P4 e o P5 existem separados do
+PR 07.
+
+O enunciado não pede este PR. Ele existe porque "instruções completas no README" é requisito
+obrigatório, e a única forma de conferir se as instruções estão completas é seguir apenas elas.
+Se ninguém além de quem escreveu o PR 09 for rodar esta validação, o honesto é fundir os itens
+no PR 09 e apagar esta seção — validação que a própria autora faz na própria máquina não é
+validação, é repetição.
+
+**Clone limpo, seguindo só o README — sem consultar o resto do repositório:**
+
+- [ ] Clonar em diretório novo, criar o venv com `python3.13` e instalar as dependências pelos
+      passos do README, anotando **todo** ponto em que foi preciso adivinhar algo
+- [ ] `python -m scripts.check_env` — exit 0
+- [ ] `pytest tests/ -m "not integration"` — sem falhas
+- [ ] Executar a sequência de comandos do README na ordem em que ela está escrita, até o
+      assistente responder. O fine-tuning pode ser pulado: os adapters já estão versionados e
+      o `02_fine_tuning.ipynb` registra a execução
+- [ ] `python -m src.graph.clinical_flow` nos dois ramos da condicional
+- [ ] Conferir a trilha da sessão por `get_session_logs` — não abrindo `logs/audit.jsonl`,
+      pelo mesmo motivo das regras do PR 09
+- [ ] Conferir que os oito comandos do README cobrem o pipeline inteiro na ordem em que se
+      executa, e anotar qualquer passo que só funcionou por causa de estado já montado
+
+**Revisão por quem não escreveu:**
+
+- [ ] `docs/relatorio-tecnico.md` — os números conferem contra `docs/evaluation_results.json`,
+      e a análise responde "onde melhorou e onde não", não só tabela
+- [ ] Os notebooks estão executados com output visível, e **nenhum** output committado contém
+      `response_preview`, `query`, nome de pessoa ou token. É a verificação humana do gate de
+      pre-commit que o PR 09 instalou — o hook pega o que ele sabe procurar
+- [ ] Os diagramas de `docs/diagramas.md` renderizam no GitHub e descrevem o código atual
 
 ---
 
 ### PR 11 — Vídeo de demonstração
-**Responsável:** Pessoa A e B juntas
+**Responsável:** Pessoa A e B juntas  
 **Entrega:** vídeo de até 15 minutos (entregável obrigatório da Fase 3)
 
-> **Pré-requisito:** PR 10 concluído — o vídeo grava o sistema já funcionando de ponta a ponta
+> **Pré-requisito:** PR 09 mergeado — é ele que deixa o sistema gravável, com o notebook
+> executado e o relatório escrito. O PR 10 corre em paralelo: ele valida o clone limpo, não
+> prepara a gravação, e o vídeo é gravado na máquina que tem o modelo.
 
 Os quatro itens abaixo são exigidos explicitamente pelo enunciado e devem aparecer no vídeo:
 
@@ -772,9 +899,15 @@ PR 01 (setup)
   ├── PR 02 (dados)        → PR 04 (fine-tuning)  →  PR 09 (docs/demo)
   ├── PR 03 (banco)        ↗
   ├── PR 05 (LLM/guardrails)  →  PR 07 (LangChain)  →  PR 09
-  ├── PR 06 (audit logger)    →  PR 08 (LangGraph)   →  PR 09
-  └──────────────────────────────────────────────── PR 10 (integração final) → PR 11 (vídeo)
+  └── PR 06 (audit logger)    →  PR 08 (LangGraph)   →  PR 09
+
+PR 09  ┬──→ PR 11 (vídeo, na máquina que tem o modelo)
+       └──→ PR 10 (validação em clone limpo, por outra pessoa)
 ```
+
+Os dois últimos correm em paralelo: o vídeo grava o sistema que o PR 09 deixou pronto, e a
+validação do PR 10 é a leitura de fora — se ela achar algo, o conserto entra antes da entrega
+final, não antes da gravação.
 
 **Paralelismo possível após PR 01:**
 - Pessoa A: PR 02 → PR 04 → PR 08
@@ -793,7 +926,8 @@ PR 01 (setup)
 | Fluxos do LangGraph | PR 08 |
 | Dataset anonimizado/sintético | PR 02 |
 | Relatório técnico detalhado | PR 09 |
-| Diagrama do fluxo LangGraph | PR 09 |
+| Diagrama do fluxo LangChain (exigido nominalmente no relatório) | PR 09 |
+| Diagrama do fluxo LangGraph (não exigido; entra por completude) | PR 09 |
 | Avaliação do modelo e análise dos resultados | PR 04 + PR 09 |
 | Logging e auditoria | PR 06 |
 | Guardrails e limites (nunca prescrever sem validação humana) | PR 05 + PR 08 |
