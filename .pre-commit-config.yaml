@@ -1,1 +1,29 @@
-repos: []
+# Gate de commit do Tech Challenge Fase 3.
+#
+# Instalar uma vez, depois de criar o venv:  pre-commit install
+# Rodar sobre o repositório inteiro:          pre-commit run --all-files
+#
+# Só há um hook, e ele existe por um motivo específico: o `03_langchain_demo.ipynb` é
+# entregue com output visível (exigência da Fase 3), e output de notebook vai para o
+# histórico do git — sem `.gitignore` que o alcance, sem permissão de arquivo que o
+# proteja e sem remoção possível depois do push. Isso contorna de uma vez os três
+# controles que protegem a trilha de auditoria hoje: o `logs/*` ignorado, o `chmod 0600`
+# do `AuditLogger` e a anonimização do `log()`.
+#
+# `nbstripout` seria a escolha óbvia e não serve: ele apaga todo o output, e o output é o
+# entregável. O porquê de cada regra está em `scripts/check_notebook_output.py`.
+repos:
+  - repo: local
+    hooks:
+      - id: check-notebook-output
+        name: output de notebook sem PII da trilha nem token
+        entry: python -m scripts.check_notebook_output
+        language: system
+        # `system` e não `python`: o hook usa só a stdlib e o venv do projeto já está
+        # montado para rodar o notebook. Criar um ambiente isolado só para ele dobraria o
+        # setup do clone limpo que o PR 10 valida, sem ganhar isolamento nenhum.
+        types: [text]
+        # O script filtra por extensão internamente (notebooks levam todas as regras,
+        # texto comum leva só as de segredo), então o filtro aqui fica largo de propósito:
+        # um token hardcoded importa em qualquer arquivo, não só no notebook.
+        pass_filenames: true

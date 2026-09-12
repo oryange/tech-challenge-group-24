@@ -39,3 +39,9 @@ huggingface-hub>=1.0.0,<2.0.0
 jupyterlab>=4.0.0,<5.0.0
 ipykernel>=7.0.0,<8.0.0
 matplotlib>=3.8.0,<4.0.0
+
+# O 03_langchain_demo.ipynb é entregue com output visível, e output de notebook entra no
+# histórico do git sem volta. O gate que confere esse output (scripts/check_notebook_output.py)
+# roda como hook, então o pre-commit faz parte do setup — não é ferramenta opcional de quem
+# desenvolve. Instalar o hook: `pre-commit install`.
+pre-commit>=4.0.0,<5.0.0
