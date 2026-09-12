@@ -21,10 +21,12 @@ flowchart TB
         PUBMED["PubMedQA<br/>data/raw/"]
         SINT["Protocolos e laudos sintéticos<br/>data/synthetic/"]
         CURATOR["curator<br/>+ anonymizer"]
-        DATASET["dataset.jsonl<br/>903 exemplos"]
+        DATASET["dataset.jsonl<br/>1004 exemplos"]
+        SPLIT["mlx/<br/>train 903 · valid 101"]
         PUBMED --> CURATOR
         SINT --> CURATOR
         CURATOR --> DATASET
+        DATASET --> SPLIT
     end
 
     subgraph ft["Fine-tuning — src/fine_tuning/"]
@@ -62,7 +64,7 @@ flowchart TB
 
     CLI["CLI e notebook de demonstração"]
 
-    DATASET --> TRAINER
+    SPLIT --> TRAINER
     ADAPTERS --> LLM
     SINT -. "CONDICOES: os protocolos do banco<br/>e os do dataset saem da mesma fonte" .-> SEED
     SQLITE --> RETRIEVER
