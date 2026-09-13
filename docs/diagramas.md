@@ -87,6 +87,11 @@ Duas ligações merecem leitura atenta, porque são decisões e não consequênc
 
 ## 2. Pipeline LangChain — `MedicalAssistant.ask`
 
+> **Este diagrama está reproduzido em [`relatorio-tecnico.md`](relatorio-tecnico.md#5-diagrama-do-fluxo-langchain),**
+> porque o enunciado o pede nominalmente entre os itens do relatório. Ao alterá-lo aqui,
+> altere lá também — é a única duplicação de conteúdo entre os dois arquivos, e ela existe
+> para que o relatório não dependa de um link para cumprir um entregável.
+
 A ordem dos passos é fixa. O que a torna uma garantia, e não uma sequência qualquer, é a
 posição de dois deles: a sanitização vem **antes** de tudo, então o texto que entra no prompt é
 o mesmo que vai para a trilha; e o guardrail vem **depois** da geração, então o rodapé de

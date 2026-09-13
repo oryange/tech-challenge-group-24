@@ -70,9 +70,22 @@ hf auth login
 # 6. Registre o kernel do Jupyter, para os notebooks rodarem com o venv
 #    Sem isso os notebooks usam o Python do sistema e os imports falham.
 python -m ipykernel install --user --name tc-fase3 --display-name "TC Fase 3"
+
+# 7. Instale o hook de pre-commit
+#    O 03_langchain_demo.ipynb é entregue com output visível, e output de notebook entra
+#    no histórico do git sem volta. O hook reprova o commit quando esse output contém PII
+#    da trilha, token ou traceback — ver "Gate de commit" abaixo.
+pre-commit install
 ```
 
 O `.env` é ignorado pelo git (regra `*.env`) — nunca comite um token.
+
+> **Se o passo 7 falhar com `Cowardly refusing to install hooks with core.hooksPath set`:**
+> alguma configuração global de git (comum em máquinas corporativas) está apontando os hooks
+> para fora do repositório. O `pre-commit` recusa instalar nesse estado, qualquer que seja o
+> valor. Confira com `git config --show-origin --get core.hooksPath`. O gate continua
+> utilizável sem o hook instalado — rode `pre-commit run --all-files` antes de cada commit —,
+> e desfazer a configuração global é decisão de quem administra a máquina, não deste projeto.
 
 ### Versões das dependências
 
@@ -159,6 +172,41 @@ python -m src.assistant.chain --listar
 python -m src.graph.clinical_flow
 ```
 
+## Resultados
+
+Fine-tuning do `meta-llama/Llama-3.2-3B-Instruct` com LoRA, avaliado sobre 50 amostras do
+conjunto de validação. Valores de `docs/evaluation_results.json`:
+
+| Série | Adapter | ROUGE-L | BLEU-4 |
+|---|---|---|---|
+| Baseline (sem adapter) | `null` | 0,1746 | 3,42 |
+| **Fine-tuned (500 iterações)** | `data/fine_tuned/adapters` | **0,2904** | **16,08** |
+| Melhor checkpoint (200 iterações) | `data/fine_tuned/adapters_best` | 0,2741 | 12,61 |
+
+Ganho do modelo entregue sobre o baseline: **+0,1157 ROUGE-L** (+66%) e **+12,65 BLEU-4**
+(+370%). O `ADAPTER_PATH` padrão é o de 500 iterações — é ele que responde no assistente e nos
+notebooks, então é o **mesmo adapter** que as métricas acima medem.
+
+A avaliação roda em decodificação gulosa e `max_tokens` 256, para isolar o efeito do adapter; o
+assistente roda em `TEMPERATURE` 0,7 e `max_tokens` 512. Mesmo adapter, configuração de
+decodificação diferente — a seção 7.3 do relatório detalha o que isso permite e o que não
+permite concluir.
+
+O ganho do fine-tuning sobre o baseline é sólido: o IC 95% da diferença fica longe de zero nas
+duas métricas. Já a comparação **entre os dois checkpoints** não se decide com 50 amostras — o
+checkpoint de melhor validation loss (200 iterações) pontua abaixo do entregue, mas o IC 95%
+dessa diferença cruza zero. O que fica é que `val_loss` não serve para escolher checkpoint aqui:
+ela discorda de sinal das métricas de geração e é plana entre as iterações 200 e 450.
+
+O porquê, e o resto da análise, está no relatório:
+
+- 📄 **[Relatório técnico completo](docs/relatorio-tecnico.md)** — fine-tuning, avaliação,
+  análise dos resultados, segurança e limitações medidas
+- 📊 **[Diagramas](docs/diagramas.md)** — arquitetura, pipeline LangChain e fluxo LangGraph
+- 🔬 **[Demonstração executada](notebooks/03_langchain_demo.ipynb)** — as sete células com
+  output visível
+- 🎥 **Vídeo de demonstração** — _(colar o link aqui antes do merge)_
+
 ## Testes
 
 ```bash
@@ -168,6 +216,35 @@ pytest tests/ -m "not integration"
 # Rodar testes de integração (requer modelo carregado)
 pytest tests/ -m integration
 ```
+
+## Gate de commit
+
+O `03_langchain_demo.ipynb` vai versionado **com output**, e output de notebook entra no
+histórico do git: nenhum `.gitignore` o alcança, nenhuma permissão de arquivo o protege e não
+há remoção possível depois do push. Isso contorna de uma vez os três controles que protegem a
+trilha de auditoria — o `logs/*` ignorado, o `0600` do `AuditLogger` e a anonimização do
+`log()`.
+
+`scripts/check_notebook_output.py` reprova o commit quando um notebook traz no output os campos
+de texto livre da trilha (`response_preview`, `query`), um caminho absoluto da máquina local
+(seja o `/Users/<nome>` de quem executou, seja o temporário `/var/folders/...` por onde o
+`ipykernel` nomeia a célula nos warnings), um token do HuggingFace, o valor literal de um
+segredo do `.env` ou um traceback. Em arquivo de texto comum valem só as duas regras de segredo.
+
+O filtro de arquivo é **denylist de binário**, não allowlist de extensão: o que não for `.png`,
+`.pdf` e companhia é conferido. Um token hardcoded importa num `.sh` ou num `.env.example`
+tanto quanto num `.py`, e um gate que só olha as extensões que alguém lembrou de listar aprova
+em silêncio o resto — silêncio que é indistinguível de "está limpo". Pelo mesmo motivo,
+arquivo que não dá para ler (encoding, permissão) vira achado em vez de passar batido.
+
+```bash
+pre-commit run --all-files            # o repositório inteiro
+python -m scripts.check_notebook_output notebooks/03_langchain_demo.ipynb   # um arquivo
+```
+
+O achado sai como arquivo, célula e regra, **nunca com o trecho que casou** — ecoá-lo colocaria
+o dado no terminal e no log de CI. A defesa principal é a allowlist de campos na própria célula
+que exibe a trilha; o gate é a rede embaixo.
 
 ## Estrutura do projeto
 
@@ -193,16 +270,17 @@ tech-challenge-group-24/
 │   ├── database/           # SQLAlchemy models + seed
 │   └── audit/              # Audit logger (nome evita sombrear o `logging` da stdlib)
 ├── scripts/
-│   └── check_env.py        # Verificação de ambiente (python -m scripts.check_env)
+│   ├── check_env.py        # Verificação de ambiente (python -m scripts.check_env)
+│   └── check_notebook_output.py  # Gate de commit: PII e token no output de notebook
 ├── tests/
 ├── docs/
-│   ├── relatorio-tecnico.md
-│   ├── diagramas.md
-│   └── evaluation_results.json  # Métricas ROUGE-L/BLEU-4 (gerado pelo evaluator)
+│   ├── relatorio-tecnico.md     # Relatório técnico da Fase 3
+│   ├── diagramas.md             # Arquitetura, LangChain e LangGraph (Mermaid)
+│   ├── evaluation_results.json  # Métricas ROUGE-L/BLEU-4 (gerado pelo evaluator)
+│   └── training_history.json    # Curvas de loss (gerado pelo trainer)
 ├── .env.example
 ├── .gitignore
 ├── .pre-commit-config.yaml
-├── CHECKLIST_FASE3.md
 ├── requirements.txt
 ├── pytest.ini
 └── README.md

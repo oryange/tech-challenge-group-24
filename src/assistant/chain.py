@@ -31,8 +31,8 @@ no prompt como **texto**, não como turnos de mensagem. O porquê, com os númer
 Duas coisas neste módulo são remendo, não solução, e estão marcadas como tal no código: o
 `cortar_repeticao`, que existe porque o modelo degenera em loop, e a checagem de prescrição
 antes da inferência. As correções de raiz são de outros módulos — `repetition_penalty` em
-`src/llm/model.py` e o dataset do fine-tuning — e estão registradas em "Pendências abertas" no
-`CHECKLIST_FASE3.md`.
+`src/llm/model.py` e o dataset do fine-tuning — e estão registradas em "Trabalhos futuros",
+em `docs/relatorio-tecnico.md`.
 """
 
 from __future__ import annotations
@@ -242,9 +242,10 @@ def cortar_repeticao(texto: str) -> str:
 
     É paliativo e não conserta a geração: o modelo continua gastando o `max_tokens` no loop,
     e o que muda é só o que o médico vê. A correção na geração seria `repetition_penalty` no
-    `mlx_lm.generate`, medida duas vezes e sem ganho nas duas — ver a entrada P1 do
-    `CHECKLIST_FASE3.md`, que também registra por que a medição feita sobre a resposta já
-    cortada não é a que decidiria isso.
+    `mlx_lm.generate`, medida duas vezes e revertida nas duas por não sustentar ganho. A
+    ressalva da medição fica registrada aqui porque ela é o motivo de o assunto não estar
+    fechado: as duas rodadas mediram a repetição sobre a resposta **já cortada** por esta
+    função, e é a repetição na geração crua que decidiria se o `repetition_penalty` ajuda.
 
     A comparação é por similaridade e não por igualdade porque o loop degrada junto: as
     repetições vêm com erro de digitação ("hemoglobria" no lugar de "hemoglobina"), e

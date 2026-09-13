@@ -42,9 +42,8 @@ MAX_TOKENS_PADRAO = 512
 # comportamento de fábrica discordarem, que é o tipo de diferença que ninguém procura quando
 # o resultado sai pior que o do relatório.
 #
-# Ressalva de método, a mesma registrada no `CHECKLIST_FASE3.md`: 8 pacientes, uma amostra
-# cada, sem seed fixa. O agregado entre cenários é o que se sustenta; o resultado de um
-# paciente isolado, não.
+# Ressalva de método da medição que fixou este valor: 8 pacientes, uma amostra cada, sem seed
+# fixa. O agregado entre cenários é o que se sustenta; o resultado de um paciente isolado, não.
 TEMPERATURE_PADRAO = 0.7
 
 # Chave: (modelo, adapter, revisão). Valor: (modelo carregado, tokenizer).
