@@ -368,7 +368,7 @@ As curvas plotadas estão em [`notebooks/02_fine_tuning.ipynb`](../notebooks/02_
 
 ## 8. Análise dos resultados
 
-### 8.1 Menor validation loss não é melhor geração
+### 8.1 Menor validation loss não é melhor geração — e a amostra não decide qual é melhor
 
 É o achado mais interessante da rodada, e ele contraria a heurística padrão.
 
@@ -377,8 +377,9 @@ As curvas plotadas estão em [`notebooks/02_fine_tuning.ipynb`](../notebooks/02_
 | Checkpoint 200 | **1,672** (melhor) | 0,2741 | 12,61 |
 | Checkpoint 500 | 1,749 (pior) | **0,2904** | **16,08** |
 
-O checkpoint com a **melhor** loss de validação pontua **pior** nas duas métricas de geração. A
-diferença no BLEU-4 é de 27%, não é ruído.
+O checkpoint com a **melhor** loss de validação pontua **pior** nas duas métricas de geração. No
+BLEU-4 o checkpoint 200 fica 21,5% abaixo do 500 — ou, pelo outro lado, o 500 gera 27% mais BLEU
+que o 200.
 
 A explicação está no que cada número mede. A `val_loss` é perplexidade token a token: mede o
 quanto o modelo se surpreende com o texto de referência, com _teacher forcing_, sempre
@@ -387,10 +388,62 @@ condicionado às próprias escolhas anteriores. Entre as iterações 200 e 500 o
 absorvendo o registro de escrita das respostas — frases curtas, declarativas, sem enumeração —
 e isso melhora a geração livre enquanto piora ligeiramente a perplexidade sobre a referência.
 
-A consequência prática é a que está na seção 7.3: o modelo entregue é o de 500 iterações, e
-quem tivesse aplicado a regra "pegue o de menor validation loss" teria entregado o pior dos
-dois. Selecionar checkpoint por `val_loss` em tarefa de geração é escolher pelo proxy quando a
-métrica de interesse está disponível.
+É tentador parar aqui e tratar 27% como uma diferença grande demais para ser acaso. Com 50
+amostras, não é — e vale medir em vez de supor.
+
+Bootstrap pareado sobre as 50 amostras, 10.000 reamostras com reposição, recalculando BLEU-4 de
+corpus em cada uma (BLEU é métrica de corpus, então recalcular sobre a reamostra é a forma
+correta — média de BLEU por sentença mediria outra coisa):
+
+| Comparação | Pontual | IC 95% | P(Δ > 0) |
+|---|---|---|---|
+| 500 − 200, BLEU-4 | +2,49 | **[−1,37 · +4,21]** | 0,91 |
+| 500 − 200, ROUGE-L | +0,0029 | **[−0,024 · +0,029]** | 0,59 |
+| 500 − baseline, BLEU-4 | +11,88 | [+5,37 · +18,31] | 1,00 |
+| 500 − baseline, ROUGE-L | +0,1016 | [+0,071 · +0,138] | 1,00 |
+
+O intervalo do 500 contra o 200 **cruza zero nas duas métricas**; em ROUGE-L a comparação é
+praticamente cara ou coroa. O ganho sobre o baseline não cruza zero em nenhuma das duas, com
+folga larga. Os intervalos são estáveis a cinco seeds de reamostragem (P(Δ > 0) entre 0,901 e
+0,907 no BLEU-4), então o que se vê não é erro de Monte Carlo do bootstrap — é a amostra de 50
+sendo pequena.
+
+A leitura honesta é essa: **o fine-tuning funciona, e isso a amostra sustenta com folga; qual dos
+dois checkpoints é melhor, ela não decide.**
+
+Uma segunda evidência aponta para o mesmo lugar. Regerar as 50 predições com o mesmo código,
+mesmas amostras, mesma decodificação gulosa, mesmos adapters e o mesmo modelo em cache **não
+devolve os mesmos números**. As duas execuções abaixo diferem só no momento em que rodaram; a
+primeira é a registrada em `docs/evaluation_results.json`:
+
+| Série | ROUGE-L 1ª / 2ª | BLEU-4 1ª / 2ª |
+|---|---|---|
+| baseline | 0,1746 / 0,1737 | 3,42 / 3,28 |
+| fine-tuned (500) | 0,2904 / 0,2753 | 16,08 / 15,16 |
+| checkpoint 200 | 0,2741 / 0,2724 | 12,61 / 12,67 |
+
+Comparando predição a predição, algumas saem **idênticas** e outras divergem já nas primeiras
+frases. Essa é a assinatura de não-determinismo numérico nos kernels da GPU virando o `argmax` em
+empates apertados: um token trocado cascateia no resto da geração. Decodificação gulosa elimina a
+amostragem, mas não garante reprodutibilidade bit a bit nesta stack. O artefato de avaliação
+também não registra as versões de `mlx` e `mlx-lm` com que foi gerado, então não dá para
+descartar que parte da diferença venha de uma atualização de biblioteca entre as duas execuções.
+
+Uma diferença de 2,5 pontos de BLEU-4 entre checkpoints, medida em 50 amostras, com variação
+entre execuções da ordem de 0,9 ponto **no mesmo adapter**, não é um resultado. É uma indicação.
+
+O que **se sustenta** não depende de a diferença ser significativa, e é a parte mais útil do
+achado: `val_loss` e as métricas de geração **discordam de sinal**, e entre as iterações 200 e
+450 a `val_loss` é plana dentro de 1,1% (seção 7.4) — ou seja, não ordena nada naquela faixa.
+Selecionar checkpoint por `val_loss` numa tarefa de geração é escolher por um proxy que aqui não
+discrimina.
+
+A consequência prática é a que está na seção 7.3: o modelo entregue é o de 500 iterações, e quem
+tivesse aplicado a regra "pegue o de menor validation loss" teria entregado o outro — sem
+evidência, nesta amostra, de que fosse pior ou melhor. O ponto não é que a regra erra o alvo; é
+que ela **aponta com confiança** para um checkpoint que as métricas de interesse não distinguem
+do entregue, apoiada numa curva plana dentro de 1,1%. Escolher pelo proxy quando a métrica de
+interesse está disponível é o erro, e ele independe de quem venceria a comparação.
 
 ### 8.2 O que o fine-tuning mudou, exemplo a exemplo
 
@@ -496,8 +549,12 @@ Ficam registradas porque limitam o teto, mas não explicam os achados acima — 
 - **903 exemplos de treino** é pouco para fine-tuning de domínio;
 - **3 bilhões de parâmetros**, escolhido para caber em Apple Silicon;
 - **LoRA de 8 camadas, rank 8** — capacidade adaptativa deliberadamente pequena;
-- **50 amostras de avaliação**, suficientes para ordenar três séries com folga, insuficientes
-  para intervalo de confiança estreito.
+- **50 amostras de avaliação**, suficientes para separar o fine-tuned do baseline com folga
+  (P(Δ > 0) = 1,00 nas duas métricas) e **insuficientes para separar os dois checkpoints** — ali
+  o IC 95% da diferença cruza zero, como mostra a seção 8.1;
+- **a avaliação não é reprodutível bit a bit**: decodificação gulosa elimina a amostragem, mas
+  regerar as mesmas 50 predições devolve agregados diferentes (8.1). Fixar `MODEL_REVISION` e
+  registrar as versões de `mlx` e `mlx-lm` no artefato reduziria o problema a uma variável só.
 
 ---
 
@@ -625,13 +682,16 @@ assistente LangChain com consulta a base estruturada e contextualização, segur
 de atuação, logging e explainability, e código modularizado em Python com README.
 
 O fine-tuning produziu ganho mensurável — ROUGE-L de 0,1746 para 0,2904 e BLEU-4 de 3,42 para
-16,08 — e a análise da seção 8.2 nomeia esse ganho pelo que ele é: alinhamento de registro e
-fidelidade à fonte, não conhecimento clínico novo. A seção 8.3 mostra onde o fine-tuning não
-chega e a recuperação de contexto chega.
+16,08, com IC 95% da diferença longe de zero nas duas métricas (8.1) — e a análise da seção 8.2
+nomeia esse ganho pelo que ele é: alinhamento de registro e fidelidade à fonte, não conhecimento
+clínico novo. A seção 8.3 mostra onde o fine-tuning não chega e a recuperação de contexto chega.
 
 Três conclusões que o projeto sustenta com número:
 
-1. **Selecionar checkpoint por validation loss teria entregado o pior dos dois modelos** (8.1).
+1. **`val_loss` não serve para selecionar checkpoint aqui** (8.1): ela discorda de sinal das
+   métricas de geração e é plana dentro de 1,1% entre as iterações 200 e 450. Qual dos dois
+   checkpoints é de fato melhor, 50 amostras não decidem — o IC 95% da diferença cruza zero. O
+   que se sustenta é que a regra aponta com confiança onde não há informação.
 2. **A composição do dataset prevê o comportamento do modelo melhor que o tamanho dele** — os
    10,1% de exemplos que citam fonte explicam a citação improvisada mais diretamente do que os
    3B de parâmetros (8.4).
@@ -651,6 +711,10 @@ Três conclusões que o projeto sustenta com número:
    quando não der para redigir com confiança.
 5. **Avaliar com juiz clínico**, não só ROUGE-L e BLEU-4 — sobreposição de texto não distingue
    conduta correta de conduta errada bem escrita (8.2).
+6. **Tornar a avaliação reprodutível e reportá-la com intervalo**: fixar `MODEL_REVISION`,
+   registrar as versões de `mlx` e `mlx-lm` no artefato, ampliar as 50 amostras e publicar IC em
+   vez de pontual. Enquanto a diferença entre dois checkpoints for menor que a variação entre
+   duas execuções do mesmo checkpoint, comparar os dois não responde nada (8.1).
 
 ---
 

@@ -187,13 +187,18 @@ Ganho do modelo entregue sobre o baseline: **+0,1157 ROUGE-L** (+66%) e **+12,65
 (+370%). O `ADAPTER_PATH` padrão é o de 500 iterações — é ele que responde no assistente e nos
 notebooks, então é o **mesmo adapter** que as métricas acima medem.
 
-A avaliação roda em decodificação gulosa e `max_tokens` 256, para ser determinística e isolar o
-efeito do adapter; o assistente roda em `TEMPERATURE` 0,7 e `max_tokens` 512. Mesmo adapter,
-configuração de decodificação diferente — a seção 7.3 do relatório detalha o que isso permite e
-o que não permite concluir.
+A avaliação roda em decodificação gulosa e `max_tokens` 256, para isolar o efeito do adapter; o
+assistente roda em `TEMPERATURE` 0,7 e `max_tokens` 512. Mesmo adapter, configuração de
+decodificação diferente — a seção 7.3 do relatório detalha o que isso permite e o que não
+permite concluir.
 
-O checkpoint de **melhor** validation loss (200 iterações) pontua **pior** nas duas métricas de
-geração. O porquê, e o resto da análise, está no relatório:
+O ganho do fine-tuning sobre o baseline é sólido: o IC 95% da diferença fica longe de zero nas
+duas métricas. Já a comparação **entre os dois checkpoints** não se decide com 50 amostras — o
+checkpoint de melhor validation loss (200 iterações) pontua abaixo do entregue, mas o IC 95%
+dessa diferença cruza zero. O que fica é que `val_loss` não serve para escolher checkpoint aqui:
+ela discorda de sinal das métricas de geração e é plana entre as iterações 200 e 450.
+
+O porquê, e o resto da análise, está no relatório:
 
 - 📄 **[Relatório técnico completo](docs/relatorio-tecnico.md)** — fine-tuning, avaliação,
   análise dos resultados, segurança e limitações medidas
