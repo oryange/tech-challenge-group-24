@@ -83,22 +83,43 @@ guardrail e trilha de auditoria sem reimplementar nada.
 
 Três origens, preparadas por `src/data/`:
 
-| Origem | Registros | Conteúdo |
-|---|---|---|
-| PubMedQA | 1.000 | perguntas e respostas clínicas sobre publicações médicas (inglês) |
-| Sintéticos do hospital | 100 | protocolos, laudos, receitas, procedimentos e FAQ (português) |
-| **Dataset curado** | **1.004** | após deduplicação, anonimização e curadoria |
+| Origem | Baixado | Após curadoria | Conteúdo |
+|---|---|---|---|
+| PubMedQA | 1.000 | 904 | perguntas e respostas clínicas sobre publicações médicas (inglês) |
+| Sintéticos do hospital | 100 | 100 | protocolos, laudos, receitas, procedimentos e FAQ (português) |
+| **Total** | 1.100 | **1.004** | o `dataset.jsonl` versionado |
+
+Os **96 descartados são todos do PubMedQA**, e todos pelo mesmo motivo: resposta com menos de 20
+palavras (`MIN_PALAVRAS_RESPOSTA`). **A deduplicação não removeu nenhum registro** — o contador
+do curator fecha em zero. Nenhum sintético caiu; eles saem de um catálogo de CID-10 sem
+repetição e com resposta sempre longa.
+
+Que os 96 sejam todos do filtro de tamanho não é detalhe: no PubMedQA a resposta curta costuma
+ser uma conclusão truncada ("Yes.", "No difference was found."), que como alvo de treino ensina
+o modelo a responder sem fundamentar — o oposto do que se quer de um assistente clínico. O
+descarte é, portanto, seleção de qualidade, e não limpeza de ruído.
+
+A coluna do meio existe porque sem ela a tabela não fecha, e tabela que não fecha obriga quem lê
+a decidir sozinho se é arredondamento ou erro.
 
 Os 100 sintéticos são gerados por `src/data/synthetic_generator.py` e representam os "dados
 próprios do hospital" que o enunciado pede: 60 perguntas frequentes de médicos, 10 protocolos,
 10 modelos de laudo, 10 de receita e 10 de procedimento, todos ancorados em CID-10.
 
 O preprocessing tem três etapas, nesta ordem: **anonimização** (`anonymize_record`, aplicado
-pelo curator sobre cada registro), **curadoria** (descarte de vazios e duplicatas) e
+pelo curator sobre cada registro), **curadoria** (deduplicação pelo par pergunta + contexto,
+depois descarte de exemplos sem pergunta ou resposta e de resposta com menos de 20 palavras) e
 **formatação** para o par `{prompt, completion}` que o MLX-LM consome.
 
-Divisão final: **903 exemplos de treino** e **101 de validação**. Nenhum exemplo foi descartado
-por tamanho ou por falta de texto — o `training_history.json` registra zero nos dois contadores.
+Divisão final: **903 exemplos de treino** e **101 de validação**, 90/10 sequencial sobre o
+dataset já embaralhado.
+
+Os dois descartes acontecem em etapas diferentes e é útil não confundi-los: o **curator** derruba
+os 96 acima, por resposta curta demais; o **formatador do MLX** não derruba mais nenhum — o
+`training_history.json` registra zero em `descartados_sem_texto` e `descartados_por_tamanho`, ou
+seja, nenhum exemplo chegou vazio à conversão e em todos o prompt coube em `max_seq_length`
+deixando ainda a reserva mínima para a resposta. Dos 1.004 curados, portanto, 1.004 viraram
+exemplo de treino ou validação — e `int(1.004 × 0,9)` é exatamente o 903 da divisão.
 
 ### 3.2 Composição do conjunto de treino
 
@@ -249,9 +270,18 @@ execução dos dois ramos está na célula 6 de
 
 ### 7.1 Protocolo
 
-`src/fine_tuning/evaluator.py`, sobre **50 amostras** do conjunto de validação, `max_tokens`
-256, mesma seed e mesmo `chat_template` do treino — servir outro template mediria a diferença
-de formatação em vez da diferença de modelo.
+`src/fine_tuning/evaluator.py`, sobre **50 amostras** do conjunto de validação, com
+**decodificação gulosa** (`generate` sem `sampler`, portanto sem amostragem), `max_tokens` 256
+e o mesmo `chat_template` do treino — servir outro template mediria a diferença de formatação
+em vez da diferença de modelo.
+
+A decodificação gulosa é escolha de protocolo, não descuido: ela torna a avaliação
+determinística, então a única coisa que varia entre as três séries é o adapter. Com amostragem,
+parte do delta entre elas seria o sorteio. A contrapartida está registrada em 7.3 — não é a
+configuração em que o sistema é demonstrado.
+
+As 50 amostras são as primeiras de `valid.jsonl`, sem sorteio: o `curator` já embaralhou o
+dataset com seed fixa, então o recorte é estável entre execuções.
 
 Métricas: **ROUGE-L** (maior subsequência comum, sensível a ordem e cobertura) e **BLEU-4**
 (precisão de n-gramas até 4). Ambas comparam a geração com a resposta de referência.
@@ -279,9 +309,25 @@ O `ADAPTER_PATH` padrão é **`data/fine_tuned/adapters`** — o de 500 iteraç�
 (`src/fine_tuning/config.py`). É o que a célula 2 do notebook de demonstração imprime a partir
 de `_identifying_params`, e é o que responde as demais células.
 
-O registro importa: as métricas desta seção são as **do sistema que o vídeo grava**, e não as de
-um checkpoint melhor que ficou na gaveta. O `adapters_best` está versionado e é a série de
-comparação da seção 8.1, não o que roda.
+O registro importa: o adapter medido nesta seção é o **mesmo que responde no notebook e no
+vídeo**, e não um checkpoint melhor que ficou na gaveta. O `adapters_best` está versionado e é
+a série de comparação da seção 8.1, não o que roda.
+
+O que **não** se pode afirmar é que estas sejam as métricas do sistema demonstrado. Duas
+configurações de decodificação divergem entre a avaliação e a demonstração, e ROUGE-L e BLEU-4
+são sensíveis às duas:
+
+| | Avaliação (7.1) | Sistema demonstrado |
+|---|---|---|
+| Decodificação | gulosa (determinística) | amostragem, `TEMPERATURE` 0,7 |
+| `max_tokens` | 256 (`evaluator.py`) | 512 (`model.py`) |
+
+A divergência é deliberada e cada lado tem a sua razão: a avaliação precisa ser determinística
+para que o delta entre séries seja do adapter, e o assistente precisa de temperatura e margem
+de tokens para responder em uso real. Mas ela impede a leitura de que os números de 7.2
+descrevam o que se vê no vídeo — eles descrevem **aquele adapter sob decodificação gulosa**.
+Medir o sistema como ele é demonstrado exigiria uma segunda rodada em 0,7, com várias amostras
+por prompt para separar o efeito do sorteio, e isso não foi feito.
 
 ### 7.4 Curvas de loss
 
@@ -303,9 +349,18 @@ De `docs/training_history.json`:
 
 A loss de treino cai de 2,455 (iteração 10) a 1,378 (iteração 500), com mínimo de 1,066 na 490.
 
-A leitura convencional é direta: treino descendo, validação subindo depois da iteração 200 —
+A leitura convencional é direta: treino descendo, validação parando de cair na iteração 200 —
 overfitting a partir dali, e o checkpoint a escolher seria o de 200. A seção 8.1 mostra por que
 essa leitura estaria errada aqui.
+
+Vale olhar a curva de perto antes, porque ela é menos dramática do que a palavra "overfitting"
+sugere: de 200 a 450 os valores são 1,672 · 1,676 · 1,688 · 1,691 · 1,677 · 1,676 — uma faixa de
+1,1%, plana dentro do que 25 batches de validação conseguem distinguir. O que existe é um platô
+e um único ponto fora dele, na 500 (1,749).
+
+Isso **reforça** o argumento de 8.1 em vez de enfraquecê-lo. Se 200 e 450 são indistinguíveis em
+`val_loss` mas separados em BLEU-4, o proxy não está só ordenando mal os extremos: ele não
+ordena nada no meio da faixa. Escolher "o de menor validation loss" ali é escolher pelo ruído.
 
 As curvas plotadas estão em [`notebooks/02_fine_tuning.ipynb`](../notebooks/02_fine_tuning.ipynb).
 
@@ -523,9 +578,24 @@ histórico do git: sem `.gitignore` que o alcance, sem permissão de arquivo que
 remoção possível depois. Isso contorna de uma vez os três controles da seção 9.2.
 
 `scripts/check_notebook_output.py`, ligado ao `.pre-commit-config.yaml`, reprova o commit quando
-o output de um notebook contém `response_preview`, `query`, token do HuggingFace, segredo
-literal do `.env` ou traceback. O achado sai como arquivo, célula e regra — **nunca com o trecho
-que casou**, que colocaria o dado no terminal e no log de CI.
+o output de um notebook contém `response_preview`, `query`, caminho absoluto da máquina local,
+token do HuggingFace, segredo literal do `.env` ou traceback. O achado sai como arquivo, célula
+e regra — **nunca com o trecho que casou**, que colocaria o dado no terminal e no log de CI.
+
+A regra de caminho absoluto existe porque o vazamento mais provável não é o mais dramático: um
+`TqdmWarning` de stderr carrega o `/Users/<nome>/...` de quem executou, chega sem
+`output_type: "error"` — então a regra do traceback não o alcança — e entra no histórico junto
+com o entregável. A regra cobre também o temporário do sistema (`/var/folders/...`), que é por
+onde o `ipykernel` nomeia a célula em todo `UserWarning` emitido de dentro de um notebook: não
+leva nome de pessoa, mas leva identificador de sessão do SO e PID do kernel, e vale o mesmo
+critério — output é a única parte da entrega que ninguém retira depois. No
+`03_langchain_demo.ipynb` esses dois prefixos foram substituídos por
+`<tmp>/ipykernel/<célula>.py`, com a substituição registrada no próprio notebook; a mensagem
+dos warnings, que é o que a demonstração comenta, ficou intacta. Duas decisões acompanham a
+regra: o filtro de arquivo é denylist de binário e não
+allowlist de extensão, e arquivo ilegível vira achado em vez de ser aprovado em silêncio. As
+duas seguem o mesmo princípio do resto desta seção — um controle que aprova o que não conferiu
+é pior que nenhum, porque produz confiança sem lastro.
 
 A defesa principal continua sendo a allowlist de campos na própria célula 7; o gate é a rede
 embaixo, para o dia em que a allowlist sair do lugar.

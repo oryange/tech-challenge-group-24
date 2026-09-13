@@ -21,6 +21,7 @@ from scripts.check_notebook_output import (
     _achados_no_texto,
     _segredos_do_env,
     _textos,
+    main,
 )
 
 TOKEN_REAL = "hf_" + "AbCdEfGhIjKlMnOpQrStUvWxYz012345"
@@ -211,3 +212,88 @@ def test_notebook_ilegivel_vira_achado(tmp_path):
     caminho = tmp_path / "quebrado.ipynb"
     caminho.write_text("{isso nao e json", encoding="utf-8")
     assert len(_achados_no_notebook(caminho, [])) == 1
+
+
+def test_svg_e_varrido():
+    """`image/svg+xml` é texto: rótulo e identificador de um gráfico saem legíveis dele.
+    Descartá-lo junto com o PNG seria abrir buraco pela conveniência de um prefixo curto."""
+    saida = {"output_type": "display_data", "data": {"image/svg+xml": "<text>[PACIENTE_005]</text>"}}
+    assert "<text>[PACIENTE_005]</text>" in _textos([saida])
+
+
+# --- Os dois modos de aprovar em silêncio ---------------------------------------------
+
+
+def test_caminho_local_no_output_reprova(tmp_path):
+    """Caminho absoluto leva o usuário do SO de quem executou para o histórico. Chega por
+    warning de stderr, sem `output_type: error`, então a regra do traceback não o pega."""
+    saida = {
+        "output_type": "stream",
+        "name": "stderr",
+        "text": ["/Users/fulano/repo/venv/lib/tqdm/auto.py:21: TqdmWarning: IProgress not found.\n"],
+    }
+    caminho = _notebook(tmp_path, "import tqdm", [saida])
+    achados = _achados_no_notebook(caminho, [])
+
+    assert len(achados) == 1
+    assert "caminho-local" in achados[0]
+    assert "fulano" not in achados[0]
+
+
+def test_temporario_do_sistema_no_output_reprova(tmp_path):
+    """`/var/folders/...` é por onde o `ipykernel` nomeia a célula em todo `UserWarning`
+    emitido de dentro do notebook. Não leva nome de pessoa, leva identificador de sessão do
+    SO e PID do kernel — e o output é a parte da entrega que ninguém retira depois."""
+    saida = {
+        "output_type": "stream",
+        "name": "stderr",
+        "text": ["/var/folders/vx/h1dj5jxx0_s68/T/ipykernel_58722/2931937533.py:1: UserWarning: x\n"],
+    }
+    caminho = _notebook(tmp_path, "import warnings", [saida])
+    achados = _achados_no_notebook(caminho, [])
+
+    assert len(achados) == 1
+    assert "caminho-local" in achados[0]
+
+
+def test_caminho_relativo_nao_reprova(tmp_path):
+    """O negativo que importa: o projeto exibe caminho relativo de propósito (`curto()` na
+    célula 2), e um gate que reprovasse isso ensinaria a desligar o hook."""
+    saida = {
+        "output_type": "stream",
+        "name": "stdout",
+        "text": ["adapter_path   data/fine_tuned/adapters\n", "var/folders é nome de pasta comum\n"],
+    }
+    caminho = _notebook(tmp_path, "print(curto(p))", [saida])
+
+    assert _achados_no_notebook(caminho, []) == []
+
+
+def test_extensao_desconhecida_e_conferida(tmp_path):
+    """O filtro de arquivo é denylist de binário, não allowlist de extensão: um token num
+    `.sh` ou num `.env.example` importa tanto quanto num `.py`, e aprovar em silêncio o que
+    não se sabe ler é indistinguível de estar limpo."""
+    alvo = tmp_path / "deploy.sh"
+    alvo.write_text(f"export HF_TOKEN={TOKEN_REAL}\n", encoding="utf-8")
+
+    assert main([str(alvo)]) == 1
+
+
+def test_binario_continua_fora_da_varredura(tmp_path):
+    """A contrapartida: o que grep nenhum leria continua pulado, sem custo nem ruído."""
+    alvo = tmp_path / "figura.png"
+    alvo.write_bytes(b"\x89PNG\r\n\x1a\n" + TOKEN_REAL.encode())
+
+    assert main([str(alvo)]) == 0
+
+
+def test_arquivo_ilegivel_reprova_em_vez_de_aprovar(tmp_path):
+    """Falhar fechado também no texto comum: um `.md` em latin-1 com token atravessaria o
+    gate se a exceção virasse lista vazia, e sem uma linha no stderr avisando."""
+    caminho = tmp_path / "notas.md"
+    caminho.write_bytes(TOKEN_REAL.encode() + b"\n caf\xe9\n")
+
+    achados = _achados_no_texto(caminho, [])
+
+    assert len(achados) == 1
+    assert "ilegivel" in achados[0]

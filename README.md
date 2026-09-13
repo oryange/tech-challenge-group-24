@@ -185,7 +185,12 @@ conjunto de validação. Valores de `docs/evaluation_results.json`:
 
 Ganho do modelo entregue sobre o baseline: **+0,1157 ROUGE-L** (+66%) e **+12,65 BLEU-4**
 (+370%). O `ADAPTER_PATH` padrão é o de 500 iterações — é ele que responde no assistente e nos
-notebooks, então as métricas acima são as do sistema que se executa.
+notebooks, então é o **mesmo adapter** que as métricas acima medem.
+
+A avaliação roda em decodificação gulosa e `max_tokens` 256, para ser determinística e isolar o
+efeito do adapter; o assistente roda em `TEMPERATURE` 0,7 e `max_tokens` 512. Mesmo adapter,
+configuração de decodificação diferente — a seção 7.3 do relatório detalha o que isso permite e
+o que não permite concluir.
 
 O checkpoint de **melhor** validation loss (200 iterações) pontua **pior** nas duas métricas de
 geração. O porquê, e o resto da análise, está no relatório:
@@ -216,9 +221,16 @@ trilha de auditoria — o `logs/*` ignorado, o `0600` do `AuditLogger` e a anoni
 `log()`.
 
 `scripts/check_notebook_output.py` reprova o commit quando um notebook traz no output os campos
-de texto livre da trilha (`response_preview`, `query`), um token do HuggingFace, o valor
-literal de um segredo do `.env` ou um traceback. Em arquivo de texto comum valem só as duas
-regras de segredo.
+de texto livre da trilha (`response_preview`, `query`), um caminho absoluto da máquina local
+(seja o `/Users/<nome>` de quem executou, seja o temporário `/var/folders/...` por onde o
+`ipykernel` nomeia a célula nos warnings), um token do HuggingFace, o valor literal de um
+segredo do `.env` ou um traceback. Em arquivo de texto comum valem só as duas regras de segredo.
+
+O filtro de arquivo é **denylist de binário**, não allowlist de extensão: o que não for `.png`,
+`.pdf` e companhia é conferido. Um token hardcoded importa num `.sh` ou num `.env.example`
+tanto quanto num `.py`, e um gate que só olha as extensões que alguém lembrou de listar aprova
+em silêncio o resto — silêncio que é indistinguível de "está limpo". Pelo mesmo motivo,
+arquivo que não dá para ler (encoding, permissão) vira achado em vez de passar batido.
 
 ```bash
 pre-commit run --all-files            # o repositório inteiro

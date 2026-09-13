@@ -4,8 +4,8 @@ Roda da raiz do repositório, com o venv ativo:
 
     python -m scripts.check_notebook_output notebooks/03_langchain_demo.ipynb
 
-Sem argumento, varre os arquivos versionados que sabe checar. Sai com 0 quando nada
-casou e 1 no primeiro achado — o `.pre-commit-config.yaml` o invoca como hook.
+Sem argumento, varre os notebooks de `notebooks/`. Sai com 0 quando nada casou e 1 quando
+há achado — o `.pre-commit-config.yaml` o invoca como hook, sempre com nomes de arquivo.
 
 Por que este arquivo existe
 ---------------------------
@@ -72,6 +72,21 @@ REGRAS_DE_OUTPUT: list[tuple[str, re.Pattern[str], str]] = [
         re.compile(r"['\"]query['\"]\s*:"),
         "campo de texto livre da trilha (pergunta do médico)",
     ),
+    # Caminho absoluto no output leva o usuário do SO de quem executou para o histórico do
+    # git, permanente. É a mesma razão pela qual traceback reprova a célula — só que um
+    # `TqdmWarning` ou um `FutureWarning` chega pelo stderr, sem `output_type: "error"`,
+    # e passaria pela regra do traceback.
+    #
+    # Os dois primeiros grupos pegam o diretório de usuário; o terceiro, o temporário do
+    # sistema, que é por onde o `ipykernel` nomeia a célula em todo `UserWarning` emitido
+    # de dentro do notebook. O temporário não carrega nome de pessoa, mas carrega o
+    # identificador de sessão do SO e o PID do kernel, e a razão para conter os dois é a
+    # mesma: o output é a única parte da entrega que ninguém consegue retirar depois.
+    (
+        "caminho-local",
+        re.compile(r"(/Users/|/home/|C:\\Users\\|(?:/private)?/var/folders/)[A-Za-z0-9._-]+"),
+        "caminho absoluto da máquina local (usuário do SO ou temporário do sistema no output)",
+    ),
 ]
 
 REGRA_DE_TOKEN = (
@@ -82,9 +97,33 @@ REGRA_DE_TOKEN = (
 
 # Mime types que não são texto: varrer o base64 de uma imagem não encontra vazamento
 # nenhum (ninguém grepa PNG) e só gasta tempo em string de megabytes.
-MIME_BINARIO = ("image/", "application/pdf")
+#
+# Enumerados um a um, e não pelo prefixo `image/`: `image/svg+xml` é texto e pode carregar
+# rótulo, identificador e trecho clínico de um gráfico. Descartá-lo junto com o PNG seria
+# abrir um buraco pela conveniência de um prefixo mais curto.
+MIME_BINARIO = ("image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf")
 
-EXTENSOES_DE_TEXTO = {".py", ".ipynb", ".md", ".txt", ".yaml", ".yml", ".toml", ".cfg", ".ini", ".json"}
+# Denylist, e não allowlist de extensão: o que não está aqui é conferido. Um gate de
+# segredo que só olha as extensões que alguém lembrou de listar aprova em silêncio o
+# `.sh`, o `.env.example` e o `Dockerfile` — e silêncio é indistinguível de "está limpo".
+# A lista abaixo é só o que grep nenhum leria mesmo.
+EXTENSOES_BINARIAS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".pdf",
+    ".pyc",
+    ".db",
+    ".sqlite",
+    ".sqlite3",
+    ".safetensors",
+    ".npz",
+    ".bin",
+    ".zip",
+    ".gz",
+}
 
 # Chaves do `.env` cujo valor é segredo. O teto de tamanho evita que um valor curto ou
 # placeholder (`""`, `"changeme"`) vire um padrão que casa com meio repositório.
@@ -186,10 +225,13 @@ def _achados_no_texto(caminho: pathlib.Path, segredos: list[str]) -> list[str]:
     As de PII da trilha não se aplicam — `response_preview` e `query` são nomes de campo
     que o código-fonte e a documentação precisam poder mencionar.
     """
+    # Falha fechado, igual ao caminho do notebook: arquivo que não dá para ler é arquivo
+    # que não dá para conferir, e aprovar em silêncio o que não foi conferido é o pior
+    # estado possível para um gate de segredo.
     try:
         conteudo = caminho.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return []
+    except (OSError, UnicodeDecodeError) as exc:
+        return [f"{caminho}: [ilegivel] não foi possível conferir o arquivo ({exc.__class__.__name__})"]
 
     achados = []
     identificador, padrao, motivo = REGRA_DE_TOKEN
@@ -211,17 +253,21 @@ def main(argv: list[str] | None = None) -> int:
     segredos = _segredos_do_env(raiz)
 
     achados: list[str] = []
+    conferidos = 0
     for alvo in alvos:
-        if not alvo.is_file() or alvo.suffix not in EXTENSOES_DE_TEXTO:
+        if not alvo.is_file() or alvo.suffix.lower() in EXTENSOES_BINARIAS:
             continue
+        conferidos += 1
         if alvo.suffix == ".ipynb":
             achados.extend(_achados_no_notebook(alvo, segredos))
         else:
             achados.extend(_achados_no_texto(alvo, segredos))
 
     if not achados:
+        # A contagem é a dos arquivos de fato conferidos, e não a dos alvos recebidos:
+        # dizer "10 conferidos" tendo pulado 7 é afirmar uma cobertura que não houve.
         origem = "com o .env local" if segredos else "sem .env local (regra de segredo literal não rodou)"
-        print(f"check_notebook_output: {len(alvos)} arquivo(s) conferido(s), nada a reportar — {origem}")
+        print(f"check_notebook_output: {conferidos} arquivo(s) conferido(s), nada a reportar — {origem}")
         return 0
 
     # O conteúdo que casou nunca é impresso: o achado sai como arquivo, célula e regra.
