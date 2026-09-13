@@ -411,26 +411,35 @@ sendo pequena.
 A leitura honesta é essa: **o fine-tuning funciona, e isso a amostra sustenta com folga; qual dos
 dois checkpoints é melhor, ela não decide.**
 
-Uma segunda evidência aponta para o mesmo lugar. Regerar as 50 predições com o mesmo código,
-mesmas amostras, mesma decodificação gulosa, mesmos adapters e o mesmo modelo em cache **não
-devolve os mesmos números**. As duas execuções abaixo diferem só no momento em que rodaram; a
-primeira é a registrada em `docs/evaluation_results.json`:
+Há uma segunda coisa que vale registrar, e ela não é sobre a amostra: **a avaliação é
+determinística, mas não é portável.**
 
-| Série | ROUGE-L 1ª / 2ª | BLEU-4 1ª / 2ª |
+Regerar as 50 predições com o mesmo código, mesmas amostras, mesma decodificação gulosa e mesmos
+adapters devolve, hoje, números diferentes dos registrados em `docs/evaluation_results.json`:
+
+| Série | ROUGE-L registrado / hoje | BLEU-4 registrado / hoje |
 |---|---|---|
 | baseline | 0,1746 / 0,1737 | 3,42 / 3,28 |
 | fine-tuned (500) | 0,2904 / 0,2753 | 16,08 / 15,16 |
 | checkpoint 200 | 0,2741 / 0,2724 | 12,61 / 12,67 |
 
-Comparando predição a predição, algumas saem **idênticas** e outras divergem já nas primeiras
-frases. Essa é a assinatura de não-determinismo numérico nos kernels da GPU virando o `argmax` em
-empates apertados: um token trocado cascateia no resto da geração. Decodificação gulosa elimina a
-amostragem, mas não garante reprodutibilidade bit a bit nesta stack. O artefato de avaliação
-também não registra as versões de `mlx` e `mlx-lm` com que foi gerado, então não dá para
-descartar que parte da diferença venha de uma atualização de biblioteca entre as duas execuções.
+A tentação é atribuir isso a não-determinismo de GPU. **Não é o caso**, e dá para descartar por
+medição: duas execuções consecutivas na mesma máquina produzem **150 de 150 predições idênticas**
+— caractere a caractere, nas três séries —, com os agregados coincidindo até a última casa
+decimal. Com o ambiente fixo, a decodificação gulosa é exatamente reprodutível, como deve ser:
+não há amostragem para variar.
 
-Uma diferença de 2,5 pontos de BLEU-4 entre checkpoints, medida em 50 amostras, com variação
-entre execuções da ordem de 0,9 ponto **no mesmo adapter**, não é um resultado. É uma indicação.
+O que mudou, portanto, foi o **ambiente** entre a execução registrada e as de hoje. As duas
+candidatas são o `MODEL_REVISION`, que não é fixado (na ausência dele o `LoRAConfig` resolve para
+a revisão que estiver em cache, e uma atualização do cache troca os pesos sem mudar uma linha do
+repositório), e as versões de `mlx` e `mlx-lm`. **Qual das duas, não dá para dizer** — e é esse o
+ponto: o artefato de avaliação não registra nenhuma das duas, então ele não carrega o suficiente
+para ser reproduzido fora da máquina e do momento em que foi gerado.
+
+Isso não enfraquece nem reforça o intervalo de confiança acima, que é sobre variabilidade
+amostral e foi medido dentro de uma execução só. São dois limites independentes da avaliação: a
+amostra é pequena demais para separar os checkpoints, e o artefato não é reproduzível fora do
+ambiente que o produziu. O segundo é o mais fácil de consertar, e está em trabalhos futuros.
 
 O que **se sustenta** não depende de a diferença ser significativa, e é a parte mais útil do
 achado: `val_loss` e as métricas de geração **discordam de sinal**, e entre as iterações 200 e
@@ -552,9 +561,10 @@ Ficam registradas porque limitam o teto, mas não explicam os achados acima — 
 - **50 amostras de avaliação**, suficientes para separar o fine-tuned do baseline com folga
   (P(Δ > 0) = 1,00 nas duas métricas) e **insuficientes para separar os dois checkpoints** — ali
   o IC 95% da diferença cruza zero, como mostra a seção 8.1;
-- **a avaliação não é reprodutível bit a bit**: decodificação gulosa elimina a amostragem, mas
-  regerar as mesmas 50 predições devolve agregados diferentes (8.1). Fixar `MODEL_REVISION` e
-  registrar as versões de `mlx` e `mlx-lm` no artefato reduziria o problema a uma variável só.
+- **o artefato de avaliação não é portável**: dentro de um ambiente fixo a avaliação é
+  exatamente reprodutível (50 de 50 predições idênticas entre execuções), mas o artefato não
+  registra a revisão do modelo nem as versões de `mlx` e `mlx-lm`, e regerá-lo hoje devolve
+  agregados diferentes dos publicados (8.1). É limitação de registro, não de método.
 
 ---
 
@@ -711,10 +721,11 @@ Três conclusões que o projeto sustenta com número:
    quando não der para redigir com confiança.
 5. **Avaliar com juiz clínico**, não só ROUGE-L e BLEU-4 — sobreposição de texto não distingue
    conduta correta de conduta errada bem escrita (8.2).
-6. **Tornar a avaliação reprodutível e reportá-la com intervalo**: fixar `MODEL_REVISION`,
-   registrar as versões de `mlx` e `mlx-lm` no artefato, ampliar as 50 amostras e publicar IC em
-   vez de pontual. Enquanto a diferença entre dois checkpoints for menor que a variação entre
-   duas execuções do mesmo checkpoint, comparar os dois não responde nada (8.1).
+6. **Tornar o artefato de avaliação portável e reportá-lo com intervalo** (8.1). São duas coisas
+   independentes e as duas são baratas: gravar no artefato a revisão do modelo e as versões de
+   `mlx` e `mlx-lm` — e fixar `MODEL_REVISION`, para o resultado não depender do que está em
+   cache — faz a rodada ser refeita anos depois; ampliar as 50 amostras e publicar IC em vez de
+   pontual faz a comparação entre checkpoints responder alguma coisa. Hoje não responde.
 
 ---
 
