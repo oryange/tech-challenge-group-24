@@ -205,7 +205,7 @@ O porquê, e o resto da análise, está no relatório:
 - 📊 **[Diagramas](docs/diagramas.md)** — arquitetura, pipeline LangChain e fluxo LangGraph
 - 🔬 **[Demonstração executada](notebooks/03_langchain_demo.ipynb)** — as sete células com
   output visível
-- 🎥 **Vídeo de demonstração** — _(colar o link aqui antes do merge)_
+- 🎥 **[Vídeo de demonstração](https://youtu.be/VTrjCmuxi34)**
 
 ## Testes
 

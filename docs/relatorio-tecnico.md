@@ -10,7 +10,7 @@ LangGraph.
 | Repositório | https://github.com/oryange/tech-challenge-group-24 |
 | Modelo base | `meta-llama/Llama-3.2-3B-Instruct` |
 | Adapter demonstrado | `data/fine_tuned/adapters` (500 iterações) |
-| Vídeo | _(colar o link aqui antes do merge)_ |
+| Vídeo | https://youtu.be/VTrjCmuxi34 |
 
 ---
 
